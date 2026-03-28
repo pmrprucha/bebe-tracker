@@ -8,10 +8,10 @@ export function AppProvider({ children }) {
   const [session, setSession]         = useState(null)
   const [profile, setProfile]         = useState(null)
   const [activeChild, setActiveChild] = useState(null)
-  const [children, setChildren]       = useState([])
+  const [kids, setKids]               = useState([])
   const [loading, setLoading]         = useState(true)
   const [toast, setToast]             = useState(null)
-  const [syncState, setSyncState]     = useState('idle') // idle | syncing | ok | err
+  const [syncState, setSyncState]     = useState('idle')
 
   const showToast = useCallback((msg) => {
     setToast(msg)
@@ -29,16 +29,15 @@ export function AppProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  // ── Load profile + children when session changes ────
+  // ── Load profile + kids when session changes ────────
   useEffect(() => {
-    if (!session) { setProfile(null); setChildren([]); setLoading(false); return }
+    if (!session) { setProfile(null); setKids([]); setLoading(false); return }
     loadUserData()
   }, [session])
 
   const loadUserData = async () => {
     setLoading(true)
     try {
-      // profile
       const { data: prof } = await sb
         .from('profiles')
         .select('*')
@@ -46,7 +45,6 @@ export function AppProvider({ children }) {
         .single()
       setProfile(prof)
 
-      // children: via family_members OR caregivers
       const [fmRes, cgRes] = await Promise.all([
         sb.from('family_members').select('child_id, is_parent, approved').eq('profile_id', session.user.id).eq('approved', true),
         sb.from('caregivers').select('child_id, approved').eq('profile_id', session.user.id).eq('approved', true)
@@ -59,14 +57,13 @@ export function AppProvider({ children }) {
       const uniqueIds = [...new Set(childIds)]
 
       if (uniqueIds.length) {
-        const { data: kids } = await sb.from('children').select('*').in('id', uniqueIds)
-        setChildren(kids || [])
-        // restore active child from localStorage
+        const { data: fetched } = await sb.from('children').select('*').in('id', uniqueIds)
+        setKids(fetched || [])
         const saved = localStorage.getItem('activeChildId')
-        const match = (kids || []).find(k => k.id === saved)
-        setActiveChild(match || kids?.[0] || null)
+        const match = (fetched || []).find(k => k.id === saved)
+        setActiveChild(match || fetched?.[0] || null)
       } else {
-        setChildren([])
+        setKids([])
         setActiveChild(null)
       }
     } catch (e) {
@@ -82,13 +79,13 @@ export function AppProvider({ children }) {
 
   const refreshChildren = () => loadUserData()
 
-  // ── Permission helpers ───────────────────────────────
-  const [permissions, setPermissions] = useState({}) // childId -> { isParent, isCaregiver, canViewHistory }
+  // ── Permissions ──────────────────────────────────────
+  const [permissions, setPermissions] = useState({})
 
   useEffect(() => {
-    if (!session || !children.length) return
+    if (!session || !kids.length) return
     loadPermissions()
-  }, [session, children])
+  }, [session, kids])
 
   const loadPermissions = async () => {
     const uid = session.user.id
@@ -113,7 +110,7 @@ export function AppProvider({ children }) {
   return (
     <AppCtx.Provider value={{
       session, profile, setProfile,
-      activeChild, children, switchChild, refreshChildren,
+      activeChild, children: kids, switchChild, refreshChildren,
       loading, toast, showToast,
       syncState, setSyncState,
       canViewHistory, isParent,
