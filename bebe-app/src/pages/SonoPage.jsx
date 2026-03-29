@@ -44,7 +44,6 @@ export default function SonoPage() {
   const planoAuto = getPlanoByWeeks(semanas)
   const numSestas = planoSel === 'auto' ? planoAuto.sestas : parseInt(planoSel)
 
-  // Janela de deitar personalizada da criança
   const deitarMin = child?.deitar_min ? toMins(child.deitar_min) : 19 * 60 + 30
   const deitarMax = child?.deitar_max ? toMins(child.deitar_max) : 20 * 60
   const sestaFacultativa = child?.sesta_facultativa ?? false
@@ -53,10 +52,14 @@ export default function SonoPage() {
     ? calcSestas(toMins(acordou), { ...planoAuto, sestas: numSestas }, realTimes)
     : null
 
-  // Clamp deitar à janela da criança
   const deitarFinal = calc?.deitar
     ? Math.min(Math.max(calc.deitar, deitarMin), deitarMax)
     : null
+
+  // ── Estado de sono nocturno ────────────────────────
+  // Se "dormiu às" está preenchido e não há "acordou" de hoje → está a dormir
+  // "acordou" é a hora em que acordou de manhã → termina o sono nocturno
+  const estADormir = dormiu && !acordou
 
   useEffect(() => { if (child) loadToday() }, [child])
   useEffect(() => () => {
@@ -89,10 +92,10 @@ export default function SonoPage() {
   }, [acordou, planoSel, realTimes, dormiu, obs])
 
   const doSave = async (d) => {
-    if (!child || !d.acordou) return
+    if (!child) return
     setSyncState('syncing')
     const numS = d.planoSel === 'auto' ? planoAuto.sestas : parseInt(d.planoSel)
-    const c = calcSestas(toMins(d.acordou), { ...planoAuto, sestas: numS }, d.realTimes)
+    const c = d.acordou ? calcSestas(toMins(d.acordou), { ...planoAuto, sestas: numS }, d.realTimes) : null
     const df = c?.deitar ? Math.min(Math.max(c.deitar, deitarMin), deitarMax) : null
     const payload = {
       acordou: d.acordou, plano: d.planoSel, dormiu: d.dormiu, obs: d.obs, ...d.realTimes,
@@ -125,6 +128,7 @@ export default function SonoPage() {
   // ── Contador acordado ──────────────────────────────
   useEffect(() => {
     clearInterval(awakeRef.current)
+    if (estADormir) { setAwakeSecs(null); return }
     const emSesta = [1,2,3].some(n => realTimes[`s${n}_ini`] && !realTimes[`s${n}_fim`])
     if (emSesta || activeTimer) { setAwakeSecs(null); return }
     const ultimoFim = (() => { for (const n of [3,2,1]) { const f = realTimes[`s${n}_fim`]; if (f) return horaToMs(f) } return null })()
@@ -134,7 +138,7 @@ export default function SonoPage() {
     tick()
     awakeRef.current = setInterval(tick, 15000)
     return () => clearInterval(awakeRef.current)
-  }, [acordou, realTimes, activeTimer])
+  }, [acordou, realTimes, activeTimer, estADormir])
 
   // ── Timer sesta ────────────────────────────────────
   useEffect(() => {
@@ -168,6 +172,11 @@ export default function SonoPage() {
     showToast('Sesta apagada')
   }
 
+  const limparDormiu = () => {
+    setDormiuAndSave('')
+    showToast('Hora de dormir apagada')
+  }
+
   const awakeColor = awakeSecs == null ? null
     : awakeSecs < 7200  ? { bg:'rgba(168,197,171,0.15)', border:'rgba(122,158,126,0.3)', text:'var(--sage)',   msg:'Dentro da janela normal' }
     : awakeSecs < 10800 ? { bg:'rgba(245,216,122,0.15)', border:'rgba(196,162,64,0.35)',  text:'var(--warn)',   msg:'A aproximar do limite' }
@@ -181,6 +190,17 @@ export default function SonoPage() {
 
   return (
     <div className="page-content">
+
+      {/* A dormir (sono nocturno) */}
+      {estADormir && (
+        <div style={{ display:'flex', alignItems:'center', gap:10, background:'rgba(106,174,200,0.1)', border:'1px solid rgba(106,174,200,0.3)', borderRadius:12, padding:'14px 16px', marginBottom:12 }}>
+          <span style={{ fontSize:28 }}>😴</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:15, fontWeight:700, color:'var(--sky)' }}>A dormir desde as {dormiu}</div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>Regista a hora de acordar quando acordar</div>
+          </div>
+        </div>
+      )}
 
       {/* Contador acordado */}
       {awakeSecs !== null && awakeColor && (
@@ -210,7 +230,10 @@ export default function SonoPage() {
           <span style={{ fontSize:10, color:'var(--sage)', fontStyle:'normal', marginLeft:6 }}>✓ guarda automaticamente</span>
         </div>
         <div className="field-row">
-          <div className="field-label">Acordou</div>
+          <div className="field-label">
+            Acordou
+            <small>hora em que acordou de manhã</small>
+          </div>
           <input type="time" value={acordou} onChange={e => setAcordouAndSave(e.target.value)} style={{ width:'auto', minWidth:110 }} />
         </div>
         <div className="field-row">
@@ -225,8 +248,8 @@ export default function SonoPage() {
         </div>
       </div>
 
-      {/* Sestas */}
-      {numSestas > 0 && Array.from({ length: numSestas }, (_, idx) => {
+      {/* Sestas — só mostrar se já acordou */}
+      {acordou && numSestas > 0 && Array.from({ length: numSestas }, (_, idx) => {
         const n = idx + 1
         const s = calc?.sestas[idx]
         const ini = realTimes[`s${n}_ini`]
@@ -290,14 +313,8 @@ export default function SonoPage() {
         <div style={{ background:'linear-gradient(135deg, #7a9e7e 0%, #5a8a7a 100%)', borderRadius:16, padding:'18px 20px', marginBottom:12, display:'flex', alignItems:'center', justifyContent:'space-between', boxShadow:'0 4px 20px rgba(122,158,126,0.25)' }}>
           <div>
             <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.6px', color:'rgba(255,255,255,0.7)', marginBottom:4 }}>Deitar — janela</div>
-            <div style={{ fontFamily:'Fraunces, serif', fontSize:28, fontWeight:300, color:'white' }}>
-              {fromMins(deitarMin)} – {fromMins(deitarMax)}
-            </div>
-            {deitarFinal && (
-              <div style={{ fontSize:12, color:'rgba(255,255,255,0.75)', marginTop:4 }}>
-                Sugestão hoje: <strong>{fromMins(deitarFinal)}</strong>
-              </div>
-            )}
+            <div style={{ fontFamily:'Fraunces, serif', fontSize:28, fontWeight:300, color:'white' }}>{fromMins(deitarMin)} – {fromMins(deitarMax)}</div>
+            {deitarFinal && <div style={{ fontSize:12, color:'rgba(255,255,255,0.75)', marginTop:4 }}>Sugestão hoje: <strong>{fromMins(deitarFinal)}</strong></div>}
           </div>
           <div style={{ fontSize:36, opacity:0.6 }}>🌙</div>
         </div>
@@ -305,9 +322,19 @@ export default function SonoPage() {
 
       {/* Dormiu + obs */}
       <div className="card">
-        <div className="field-row" style={{ marginBottom:12 }}>
-          <div className="field-label">Dormiu às<small>hora real de adormecer</small></div>
-          <input type="time" value={dormiu} onChange={e => setDormiuAndSave(e.target.value)} style={{ width:'auto', minWidth:110 }} />
+        <div style={{ marginBottom:12 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+            <div className="field-label">
+              Dormiu às
+              <small>hora em que adormeceuu à noite</small>
+            </div>
+            {dormiu && (
+              <button onClick={limparDormiu} style={{ fontSize:11, color:'var(--danger)', background:'rgba(192,97,78,0.08)', border:'1px solid rgba(192,97,78,0.25)', borderRadius:6, padding:'3px 8px', cursor:'pointer', fontFamily:'inherit' }}>
+                ✕ Apagar
+              </button>
+            )}
+          </div>
+          <input type="time" value={dormiu} onChange={e => setDormiuAndSave(e.target.value)} style={{ width:'100%' }} />
         </div>
         <div style={{ fontSize:12, color:'var(--muted)', marginBottom:4 }}>Observações</div>
         <textarea value={obs} onChange={e => setObsAndSave(e.target.value)} placeholder="notas do dia…" />
