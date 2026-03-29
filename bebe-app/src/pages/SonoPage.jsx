@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { sb } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
 import {
@@ -6,12 +6,12 @@ import {
   fromMins, toMins, formatDur, today, nowHHMM, fmtSecs
 } from '../lib/sleep'
 
-function fmtSinceShort(secs) {
-  if (secs < 60) return `${secs}s`
+function fmtAwake(secs) {
+  if (!secs || secs < 0) return '–'
   const m = Math.floor(secs / 60)
   const h = Math.floor(m / 60)
   if (h === 0) return `${m}min`
-  return `${h}h ${m % 60 > 0 ? m % 60 + 'min' : ''}`
+  return `${h}h${m % 60 > 0 ? ` ${m % 60}min` : ''}`
 }
 
 function horaToMs(hora) {
@@ -22,6 +22,9 @@ function horaToMs(hora) {
   return d.getTime()
 }
 
+// Vera nunca dorme antes das 19:30 — override mínimo de deitar
+const DEITAR_MINIMO = 19 * 60 + 30
+
 export default function SonoPage() {
   const { activeChild, profile, showToast, setSyncState } = useApp()
   const [acordou, setAcordou]     = useState('')
@@ -29,12 +32,15 @@ export default function SonoPage() {
   const [realTimes, setRealTimes] = useState({ s1_ini:'', s1_fim:'', s2_ini:'', s2_fim:'', s3_ini:'', s3_fim:'' })
   const [dormiu, setDormiu]       = useState('')
   const [obs, setObs]             = useState('')
-  const [activeTimer, setActiveTimer] = useState(null)
+  const [activeTimer, setActiveTimer] = useState(null) // { sesta, startMs }
   const [timerDisplay, setTimerDisplay] = useState('00:00')
-  const [awakeSecs, setAwakeSecs] = useState(null) // contador acordado ao vivo
-  const [saving, setSaving]       = useState(false)
+  const [awakeSecs, setAwakeSecs] = useState(null)
+  const [deleteNap, setDeleteNap] = useState(null) // n para confirmar apagar sesta
+
   const timerRef  = useRef(null)
   const awakeRef  = useRef(null)
+  const saveDebRef = useRef(null)
+  const latestData = useRef({})
 
   const child     = activeChild
   const semanas   = child ? getWeeks(child.birthdate) : 0
@@ -42,8 +48,17 @@ export default function SonoPage() {
   const numSestas = planoSel === 'auto' ? planoAuto.sestas : parseInt(planoSel)
   const calc      = acordou ? calcSestas(toMins(acordou), { ...planoAuto, sestas: numSestas }, realTimes) : null
 
+  // Deitar com mínimo de 19:30
+  const deitarFinal = calc?.deitar
+    ? Math.max(calc.deitar, DEITAR_MINIMO)
+    : null
+
   useEffect(() => { if (child) loadToday() }, [child])
-  useEffect(() => () => { clearInterval(timerRef.current); clearInterval(awakeRef.current) }, [])
+  useEffect(() => () => {
+    clearInterval(timerRef.current)
+    clearInterval(awakeRef.current)
+    clearTimeout(saveDebRef.current)
+  }, [])
 
   const loadToday = async () => {
     const { data } = await sb.from('sleep_events').select('*')
@@ -52,86 +67,118 @@ export default function SonoPage() {
       const p = data.payload
       setAcordou(p.acordou || '')
       setPlanoSel(p.plano || 'auto')
-      setRealTimes({ s1_ini: p.s1_ini||'', s1_fim: p.s1_fim||'', s2_ini: p.s2_ini||'', s2_fim: p.s2_fim||'', s3_ini: p.s3_ini||'', s3_fim: p.s3_fim||'' })
+      setRealTimes({ s1_ini:p.s1_ini||'', s1_fim:p.s1_fim||'', s2_ini:p.s2_ini||'', s2_fim:p.s2_fim||'', s3_ini:p.s3_ini||'', s3_fim:p.s3_fim||'' })
       setDormiu(p.dormiu || '')
       setObs(p.obs || '')
     }
   }
 
-  // ── Contador "acordado desde" ──────────────────────
-  // Calcula o último momento em que o bebé acordou (fim da última sesta, ou hora de acordar de manhã)
+  // ── Auto-save com debounce 2s ──────────────────────
+  const triggerSave = useCallback((overrides = {}) => {
+    clearTimeout(saveDebRef.current)
+    saveDebRef.current = setTimeout(() => {
+      const d = { ...latestData.current, ...overrides }
+      doSave(d)
+    }, 2000)
+  }, [child, profile])
+
+  // Mantemos latestData actualizado
+  useEffect(() => {
+    latestData.current = { acordou, planoSel, realTimes, dormiu, obs }
+  }, [acordou, planoSel, realTimes, dormiu, obs])
+
+  const doSave = async (d) => {
+    if (!child || !d.acordou) return
+    setSyncState('syncing')
+    const c = d.acordou ? calcSestas(toMins(d.acordou), { ...planoAuto, sestas: d.planoSel === 'auto' ? planoAuto.sestas : parseInt(d.planoSel) }, d.realTimes) : null
+    const deitarF = c?.deitar ? Math.max(c.deitar, DEITAR_MINIMO) : null
+    const payload = {
+      acordou: d.acordou, plano: d.planoSel, dormiu: d.dormiu, obs: d.obs,
+      ...d.realTimes,
+      alvo1: c?.sestas[0] ? fromMins(c.sestas[0].alvo) : '',
+      alvo2: c?.sestas[1] ? fromMins(c.sestas[1].alvo) : '',
+      alvo3: c?.sestas[2] ? fromMins(c.sestas[2].alvo) : '',
+      deitar: deitarF ? fromMins(deitarF) : '',
+      alertas: c?.alertas || [],
+    }
+    const { error } = await sb.from('sleep_events').upsert({
+      child_id: child.id, data_date: today(),
+      payload, recorded_by: profile?.id, updated_at: new Date().toISOString()
+    }, { onConflict: 'child_id,data_date' })
+    setSyncState(error ? 'err' : 'ok')
+  }
+
+  // Helpers que actualizam state E disparam save
+  const setAcordouAndSave = (v) => { setAcordou(v); triggerSave({ acordou: v }) }
+  const setPlanoAndSave   = (v) => { setPlanoSel(v); triggerSave({ planoSel: v }) }
+  const setObsAndSave     = (v) => { setObs(v); triggerSave({ obs: v }) }
+  const setDormiuAndSave  = (v) => { setDormiu(v); triggerSave({ dormiu: v }) }
+  const setRTAndSave      = (key, val) => {
+    const next = { ...realTimes, [key]: val }
+    setRealTimes(next)
+    triggerSave({ realTimes: next })
+  }
+
+  // ── Contador acordado ──────────────────────────────
   useEffect(() => {
     clearInterval(awakeRef.current)
+    const emSesta = [1,2,3].some(n => realTimes[`s${n}_ini`] && !realTimes[`s${n}_fim`])
+    if (emSesta || activeTimer) { setAwakeSecs(null); return }
 
-    // Determinar referência: fim da última sesta concluída, ou hora de acordar se sem sestas
     const ultimoFim = (() => {
-      for (const n of [3, 2, 1]) {
+      for (const n of [3,2,1]) {
         const fim = realTimes[`s${n}_fim`]
         if (fim) return horaToMs(fim)
       }
       return null
     })()
 
-    // Se está numa sesta agora, não mostra acordado
-    const sestaAtiva = activeTimer !== null
-    const emSesta = [1,2,3].some(n => realTimes[`s${n}_ini`] && !realTimes[`s${n}_fim`])
-
-    if (sestaAtiva || emSesta) { setAwakeSecs(null); return }
-
     const refMs = ultimoFim || horaToMs(acordou)
     if (!refMs) { setAwakeSecs(null); return }
 
     const tick = () => setAwakeSecs(Math.max(0, Math.floor((Date.now() - refMs) / 1000)))
     tick()
-    awakeRef.current = setInterval(tick, 10000)
+    awakeRef.current = setInterval(tick, 15000)
     return () => clearInterval(awakeRef.current)
   }, [acordou, realTimes, activeTimer])
 
-  // ── Sesta timer ────────────────────────────────────
-  const stopSestaTimer = () => {
-    if (!activeTimer) return
-    const { sesta } = activeTimer
-    setRealTimes(prev => ({ ...prev, [`s${sesta}_fim`]: nowHHMM() }))
-    clearInterval(timerRef.current)
-    setActiveTimer(null)
-  }
-
+  // ── Timer sesta ────────────────────────────────────
   useEffect(() => {
+    clearInterval(timerRef.current)
     if (!activeTimer) return
     const iv = setInterval(() => {
-      setTimerDisplay(fmtSecs(Math.floor((Date.now() - activeTimer.start) / 1000)))
-    }, 1000)
+      setTimerDisplay(fmtSecs(Math.floor((Date.now() - activeTimer.startMs) / 1000)))
+    }, 500)
     return () => clearInterval(iv)
   }, [activeTimer])
 
-  // ── Save ───────────────────────────────────────────
-  const guardar = async () => {
-    if (!child || !acordou) { showToast('Preenche a hora de acordar'); return }
-    setSaving(true); setSyncState('syncing')
-    const payload = {
-      acordou, plano: planoSel, dormiu, obs, ...realTimes,
-      alvo1: calc?.sestas[0] ? fromMins(calc.sestas[0].alvo) : '',
-      alvo2: calc?.sestas[1] ? fromMins(calc.sestas[1].alvo) : '',
-      alvo3: calc?.sestas[2] ? fromMins(calc.sestas[2].alvo) : '',
-      deitar: calc?.deitar ? fromMins(calc.deitar) : '',
-      alertas: calc?.alertas || [],
-    }
-    const { error } = await sb.from('sleep_events').upsert({
-      child_id: child.id, data_date: today(),
-      payload, recorded_by: profile?.id, updated_at: new Date().toISOString()
-    }, { onConflict: 'child_id,data_date' })
-    setSaving(false)
-    if (error) { setSyncState('err'); showToast('Erro ao guardar'); return }
-    setSyncState('ok'); showToast('Sono guardado ✓')
+  const iniciarSesta = (n) => {
+    const now = nowHHMM()
+    setRTAndSave(`s${n}_ini`, now)
+    setActiveTimer({ sesta: n, startMs: Date.now() })
   }
 
-  const setRT = (key, val) => setRealTimes(prev => ({ ...prev, [key]: val }))
+  const terminarSesta = (n) => {
+    const now = nowHHMM()
+    setRTAndSave(`s${n}_fim`, now)
+    setActiveTimer(null)
+  }
 
-  // Cor do contador acordado: verde < 2h, amarelo 2-3h, vermelho > 3h
+  // ── Apagar sesta ───────────────────────────────────
+  const confirmarApagarSesta = (n) => {
+    const next = { ...realTimes, [`s${n}_ini`]: '', [`s${n}_fim`]: '' }
+    setRealTimes(next)
+    if (activeTimer?.sesta === n) { clearInterval(timerRef.current); setActiveTimer(null) }
+    triggerSave({ realTimes: next })
+    setDeleteNap(null)
+    showToast('Sesta apagada')
+  }
+
+  // Cor do contador acordado
   const awakeColor = awakeSecs == null ? null
-    : awakeSecs < 7200  ? { bg: 'rgba(168,197,171,0.15)', border: 'rgba(122,158,126,0.3)', text: 'var(--sage)' }
-    : awakeSecs < 10800 ? { bg: 'rgba(245,216,122,0.15)', border: 'rgba(196,162,64,0.35)', text: 'var(--warn)' }
-    : { bg: 'rgba(232,165,152,0.15)', border: 'rgba(232,165,152,0.4)', text: 'var(--danger)' }
+    : awakeSecs < 7200  ? { bg:'rgba(168,197,171,0.15)', border:'rgba(122,158,126,0.3)', text:'var(--sage)',   msg:'Dentro da janela normal' }
+    : awakeSecs < 10800 ? { bg:'rgba(245,216,122,0.15)', border:'rgba(196,162,64,0.35)',  text:'var(--warn)',   msg:'A aproximar do limite' }
+    :                     { bg:'rgba(232,165,152,0.15)', border:'rgba(232,165,152,0.4)',   text:'var(--danger)', msg:'Pode estar com sono!' }
 
   if (!child) return (
     <div className="page-content">
@@ -142,41 +189,40 @@ export default function SonoPage() {
   return (
     <div className="page-content">
 
-      {/* Contador acordado */}
+      {/* Estado actual — contador acordado */}
       {awakeSecs !== null && awakeColor && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center',
-          background: awakeColor.bg, border: `1px solid ${awakeColor.border}`,
-          borderRadius: 12, padding: '12px 16px', marginBottom: 12
-        }}>
-          <span style={{ fontSize: 20 }}>☀️</span>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: awakeColor.text }}>
-              Acordado há {fmtSinceShort(awakeSecs)}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
-              {awakeSecs < 7200 ? 'Dentro da janela normal' : awakeSecs < 10800 ? 'A aproximar do limite de sesta' : 'Pode estar com sono — hora de sesta!'}
-            </div>
+        <div style={{ display:'flex', alignItems:'center', gap:10, background:awakeColor.bg, border:`1px solid ${awakeColor.border}`, borderRadius:12, padding:'12px 16px', marginBottom:12 }}>
+          <span style={{ fontSize:22 }}>☀️</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:15, fontWeight:700, color:awakeColor.text }}>Acordado há {fmtAwake(awakeSecs)}</div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{awakeColor.msg}</div>
+          </div>
+          <div style={{ fontSize:11, color:'var(--muted)', textAlign:'right' }}>
+            {calc?.deitar ? <>Deitar ~<br/><strong style={{color:'var(--sage)', fontSize:13}}>{fromMins(deitarFinal)}</strong></> : null}
           </div>
         </div>
       )}
 
       {/* Plano evolutivo */}
-      <div className="alert alert-info" style={{ marginBottom: 12 }}>
+      <div className="alert alert-info" style={{ marginBottom:12 }}>
         🌱 <span><strong>{planoAuto.label}</strong> — {planoAuto.desc}</span>
       </div>
 
+      {/* Alertas */}
+      {calc?.alertas?.map((a, i) => (
+        <div key={i} className="alert alert-warn">⚠️ {a}</div>
+      ))}
+
       {/* Dados do dia */}
       <div className="card">
-        <div className="card-title">📅 Hoje</div>
+        <div className="card-title">📅 Hoje <span style={{fontSize:10, color:'var(--sage)', fontStyle:'normal', marginLeft:6}}>✓ guarda automaticamente</span></div>
         <div className="field-row">
           <div className="field-label">Acordou</div>
-          <input type="time" value={acordou} onChange={e => setAcordou(e.target.value)}
-            style={{ width: 'auto', minWidth: 110 }} />
+          <input type="time" value={acordou} onChange={e => setAcordouAndSave(e.target.value)} style={{ width:'auto', minWidth:110 }} />
         </div>
         <div className="field-row">
           <div className="field-label">Plano</div>
-          <select value={planoSel} onChange={e => setPlanoSel(e.target.value)} style={{ width: 'auto', minWidth: 130 }}>
+          <select value={planoSel} onChange={e => setPlanoAndSave(e.target.value)} style={{ width:'auto', minWidth:130 }}>
             <option value="auto">Auto ({planoAuto.sestas} sestas)</option>
             <option value="3">3 sestas</option>
             <option value="2">2 sestas</option>
@@ -185,76 +231,60 @@ export default function SonoPage() {
         </div>
       </div>
 
-      {/* Alertas */}
-      {calc?.alertas?.map((a, i) => (
-        <div key={i} className="alert alert-warn">⚠️ {a}</div>
-      ))}
-
       {/* Sestas */}
       {Array.from({ length: numSestas }, (_, idx) => {
         const n = idx + 1
         const s = calc?.sestas[idx]
         const ini = realTimes[`s${n}_ini`]
         const fim = realTimes[`s${n}_fim`]
-        const isTimerActive = activeTimer?.sesta === n
-        const durAlvo = s?.durAlvo ? formatDur(s.durAlvo) : '–'
+        const isActive = activeTimer?.sesta === n
+        const temRegisto = ini || fim
 
         return (
-          <div key={n} style={{ background: 'var(--warm)', border: '1px solid var(--border)', borderRadius: 14, padding: '13px 14px', marginBottom: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--earth)' }}>{n}ª Sesta</span>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                {s && <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 600, background: 'white', color: 'var(--sage)', border: '1px solid var(--sage-light)', borderRadius: 8, padding: '3px 9px' }}>
+          <div key={n} style={{ background:'var(--warm)', border:'1px solid var(--border)', borderRadius:14, padding:'13px 14px', marginBottom:10 }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+              <span style={{ fontSize:13, fontWeight:600, color:'var(--earth)' }}>{n}ª Sesta</span>
+              <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                {s && <span style={{ fontFamily:'monospace', fontSize:13, fontWeight:600, background:'white', color:'var(--sage)', border:'1px solid var(--sage-light)', borderRadius:8, padding:'3px 9px' }}>
                   ⏰ {fromMins(s.alvo)}
                 </span>}
-                <span style={{ fontSize: 11, color: 'var(--muted)', background: 'white', border: '1px solid var(--border)', borderRadius: 6, padding: '3px 7px' }}>~{durAlvo}</span>
+                <span style={{ fontSize:11, color:'var(--muted)', background:'white', border:'1px solid var(--border)', borderRadius:6, padding:'3px 7px' }}>~{s?.durAlvo ? formatDur(s.durAlvo) : '–'}</span>
+                {/* Botão apagar sesta */}
+                {temRegisto && (
+                  <button onClick={() => setDeleteNap(n)} style={{ padding:'3px 8px', borderRadius:6, border:'1px solid rgba(192,97,78,0.3)', background:'rgba(192,97,78,0.06)', color:'var(--danger)', fontSize:11, cursor:'pointer', fontFamily:'inherit' }}>✕</button>
+                )}
               </div>
             </div>
 
-            {isTimerActive && (
-              <div style={{ background: 'var(--sky)', borderRadius: 10, padding: '10px 14px', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ color: 'white', fontSize: 13, fontWeight: 600 }}>⏱ A dormir…</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 20, color: 'white', fontWeight: 600 }}>{timerDisplay}</span>
+            {isActive && (
+              <div style={{ background:'var(--sky)', borderRadius:10, padding:'10px 14px', marginBottom:10, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <span style={{ color:'white', fontSize:13, fontWeight:600 }}>⏱ A dormir…</span>
+                <span style={{ fontFamily:'monospace', fontSize:20, color:'white', fontWeight:600 }}>{timerDisplay}</span>
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="time" value={ini} onChange={e => setRT(`s${n}_ini`, e.target.value)}
-                style={{ flex: 1, textAlign: 'center', fontSize: 15 }} placeholder="início" />
-              <span style={{ color: 'var(--muted)', fontSize: 13 }}>→</span>
-              <input type="time" value={fim} onChange={e => setRT(`s${n}_fim`, e.target.value)}
-                style={{ flex: 1, textAlign: 'center', fontSize: 15 }} placeholder="fim" />
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <input type="time" value={ini} onChange={e => setRTAndSave(`s${n}_ini`, e.target.value)} style={{ flex:1, textAlign:'center', fontSize:15 }} placeholder="início" />
+              <span style={{ color:'var(--muted)', fontSize:13 }}>→</span>
+              <input type="time" value={fim} onChange={e => setRTAndSave(`s${n}_fim`, e.target.value)} style={{ flex:1, textAlign:'center', fontSize:15 }} placeholder="fim" />
             </div>
 
-            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-              {!isTimerActive && !ini && (
-                <button onClick={() => { setRT(`s${n}_ini`, nowHHMM()); setActiveTimer({ sesta: n, start: Date.now() }) }}
-                  style={{ flex: 1, padding: '8px', borderRadius: 8, border: '1px solid var(--sky-light)', background: 'rgba(143,179,200,0.1)', color: 'var(--sky)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  ▶ Começou
-                </button>
+            <div style={{ display:'flex', gap:6, marginTop:8 }}>
+              {!isActive && !ini && (
+                <button onClick={() => iniciarSesta(n)} style={{ flex:1, padding:'8px', borderRadius:8, border:'1px solid var(--sky-light)', background:'rgba(143,179,200,0.1)', color:'var(--sky)', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>▶ Começou</button>
               )}
-              {isTimerActive && (
-                <button onClick={stopSestaTimer}
-                  style={{ flex: 1, padding: '8px', borderRadius: 8, border: '1px solid rgba(192,97,78,0.3)', background: 'rgba(192,97,78,0.08)', color: 'var(--danger)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  ⏹ Acordou
-                </button>
+              {isActive && (
+                <button onClick={() => terminarSesta(n)} style={{ flex:1, padding:'8px', borderRadius:8, border:'1px solid rgba(192,97,78,0.3)', background:'rgba(192,97,78,0.08)', color:'var(--danger)', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>⏹ Acordou</button>
               )}
-              {ini && !isTimerActive && !fim && (
-                <button onClick={() => setRT(`s${n}_fim`, nowHHMM())}
-                  style={{ flex: 1, padding: '8px', borderRadius: 8, border: '1px solid rgba(122,158,126,0.3)', background: 'rgba(122,158,126,0.08)', color: 'var(--sage)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                  ✓ Acordou agora
-                </button>
+              {ini && !isActive && !fim && (
+                <button onClick={() => { setRTAndSave(`s${n}_fim`, nowHHMM()) }} style={{ flex:1, padding:'8px', borderRadius:8, border:'1px solid rgba(122,158,126,0.3)', background:'rgba(122,158,126,0.08)', color:'var(--sage)', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>✓ Acordou agora</button>
               )}
             </div>
 
             {s?.quality && fim && ini && (
-              <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="quality-pill" style={{ background: s.quality.bg, color: s.quality.color }}>
-                  {s.quality.label}
-                </span>
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  Real: {formatDur(s.durReal)} / Ideal: ~{formatDur(s.durAlvo)}
-                </span>
+              <div style={{ marginTop:10, display:'flex', alignItems:'center', gap:8 }}>
+                <span className="quality-pill" style={{ background:s.quality.bg, color:s.quality.color }}>{s.quality.label}</span>
+                <span style={{ fontSize:11, color:'var(--muted)' }}>Real: {formatDur(s.durReal)} / Ideal: ~{formatDur(s.durAlvo)}</span>
               </div>
             )}
           </div>
@@ -262,34 +292,42 @@ export default function SonoPage() {
       })}
 
       {/* Deitar */}
-      {calc?.deitar && (
-        <div style={{
-          background: 'linear-gradient(135deg, #7a9e7e 0%, #5a8a7a 100%)',
-          borderRadius: 16, padding: '18px 20px', marginBottom: 12,
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          boxShadow: '0 4px 20px rgba(122,158,126,0.25)'
-        }}>
+      {deitarFinal && (
+        <div style={{ background:'linear-gradient(135deg, #7a9e7e 0%, #5a8a7a 100%)', borderRadius:16, padding:'18px 20px', marginBottom:12, display:'flex', alignItems:'center', justifyContent:'space-between', boxShadow:'0 4px 20px rgba(122,158,126,0.25)' }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'rgba(255,255,255,0.7)', marginBottom: 4 }}>Deitar — alvo</div>
-            <div style={{ fontFamily: 'Fraunces, serif', fontSize: 36, fontWeight: 300, color: 'white', letterSpacing: -1 }}>{fromMins(calc.deitar)}</div>
+            <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.6px', color:'rgba(255,255,255,0.7)', marginBottom:4 }}>Deitar — alvo</div>
+            <div style={{ fontFamily:'Fraunces, serif', fontSize:36, fontWeight:300, color:'white', letterSpacing:-1 }}>{fromMins(deitarFinal)}</div>
           </div>
-          <div style={{ fontSize: 36, opacity: 0.6 }}>🌙</div>
+          <div style={{ fontSize:36, opacity:0.6 }}>🌙</div>
         </div>
       )}
 
       {/* Dormiu + obs */}
       <div className="card">
-        <div className="field-row" style={{ marginBottom: 12 }}>
+        <div className="field-row" style={{ marginBottom:12 }}>
           <div className="field-label">Dormiu às<small>hora real de adormecer</small></div>
-          <input type="time" value={dormiu} onChange={e => setDormiu(e.target.value)} style={{ width: 'auto', minWidth: 110 }} />
+          <input type="time" value={dormiu} onChange={e => setDormiuAndSave(e.target.value)} style={{ width:'auto', minWidth:110 }} />
         </div>
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Observações</div>
-        <textarea value={obs} onChange={e => setObs(e.target.value)} placeholder="notas do dia…" />
+        <div style={{ fontSize:12, color:'var(--muted)', marginBottom:4 }}>Observações</div>
+        <textarea value={obs} onChange={e => setObsAndSave(e.target.value)} placeholder="notas do dia…" />
       </div>
 
-      <button className="btn btn-primary" onClick={guardar} disabled={saving}>
-        {saving ? '…' : '💾 Guardar dia'}
-      </button>
+      {/* Confirm apagar sesta */}
+      {deleteNap && (
+        <div className="modal-overlay" onClick={() => setDeleteNap(null)}>
+          <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+            <div style={{ textAlign:'center', marginBottom:20 }}>
+              <div style={{ fontSize:40, marginBottom:10 }}>🗑️</div>
+              <h3 style={{ fontFamily:'Fraunces, serif', fontSize:18, fontWeight:400, marginBottom:8 }}>Apagar {deleteNap}ª sesta?</h3>
+              <p style={{ fontSize:14, color:'var(--muted)' }}>Os horários registados serão apagados.</p>
+            </div>
+            <div style={{ display:'flex', gap:10 }}>
+              <button onClick={() => setDeleteNap(null)} style={{ flex:1, padding:'13px', borderRadius:12, border:'1px solid var(--border)', background:'var(--warm)', color:'var(--text)', fontSize:15, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>Cancelar</button>
+              <button onClick={() => confirmarApagarSesta(deleteNap)} style={{ flex:1, padding:'13px', borderRadius:12, border:'none', background:'var(--danger)', color:'white', fontSize:15, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>Apagar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
