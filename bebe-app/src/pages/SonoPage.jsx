@@ -22,9 +22,6 @@ function horaToMs(hora) {
   return d.getTime()
 }
 
-// Vera nunca dorme antes das 19:30 — override mínimo de deitar
-const DEITAR_MINIMO = 19 * 60 + 30
-
 export default function SonoPage() {
   const { activeChild, profile, showToast, setSyncState } = useApp()
   const [acordou, setAcordou]     = useState('')
@@ -32,13 +29,13 @@ export default function SonoPage() {
   const [realTimes, setRealTimes] = useState({ s1_ini:'', s1_fim:'', s2_ini:'', s2_fim:'', s3_ini:'', s3_fim:'' })
   const [dormiu, setDormiu]       = useState('')
   const [obs, setObs]             = useState('')
-  const [activeTimer, setActiveTimer] = useState(null) // { sesta, startMs }
+  const [activeTimer, setActiveTimer] = useState(null)
   const [timerDisplay, setTimerDisplay] = useState('00:00')
   const [awakeSecs, setAwakeSecs] = useState(null)
-  const [deleteNap, setDeleteNap] = useState(null) // n para confirmar apagar sesta
+  const [deleteNap, setDeleteNap] = useState(null)
 
-  const timerRef  = useRef(null)
-  const awakeRef  = useRef(null)
+  const timerRef   = useRef(null)
+  const awakeRef   = useRef(null)
   const saveDebRef = useRef(null)
   const latestData = useRef({})
 
@@ -46,11 +43,19 @@ export default function SonoPage() {
   const semanas   = child ? getWeeks(child.birthdate) : 0
   const planoAuto = getPlanoByWeeks(semanas)
   const numSestas = planoSel === 'auto' ? planoAuto.sestas : parseInt(planoSel)
-  const calc      = acordou ? calcSestas(toMins(acordou), { ...planoAuto, sestas: numSestas }, realTimes) : null
 
-  // Deitar com mínimo de 19:30
+  // Janela de deitar personalizada da criança
+  const deitarMin = child?.deitar_min ? toMins(child.deitar_min) : 19 * 60 + 30
+  const deitarMax = child?.deitar_max ? toMins(child.deitar_max) : 20 * 60
+  const sestaFacultativa = child?.sesta_facultativa ?? false
+
+  const calc = acordou
+    ? calcSestas(toMins(acordou), { ...planoAuto, sestas: numSestas }, realTimes)
+    : null
+
+  // Clamp deitar à janela da criança
   const deitarFinal = calc?.deitar
-    ? Math.max(calc.deitar, DEITAR_MINIMO)
+    ? Math.min(Math.max(calc.deitar, deitarMin), deitarMax)
     : null
 
   useEffect(() => { if (child) loadToday() }, [child])
@@ -73,16 +78,12 @@ export default function SonoPage() {
     }
   }
 
-  // ── Auto-save com debounce 2s ──────────────────────
-  const triggerSave = useCallback((overrides = {}) => {
+  // ── Auto-save debounce 2s ──────────────────────────
+  const triggerSave = useCallback(() => {
     clearTimeout(saveDebRef.current)
-    saveDebRef.current = setTimeout(() => {
-      const d = { ...latestData.current, ...overrides }
-      doSave(d)
-    }, 2000)
-  }, [child, profile])
+    saveDebRef.current = setTimeout(() => doSave(latestData.current), 2000)
+  }, [child])
 
-  // Mantemos latestData actualizado
   useEffect(() => {
     latestData.current = { acordou, planoSel, realTimes, dormiu, obs }
   }, [acordou, planoSel, realTimes, dormiu, obs])
@@ -90,15 +91,15 @@ export default function SonoPage() {
   const doSave = async (d) => {
     if (!child || !d.acordou) return
     setSyncState('syncing')
-    const c = d.acordou ? calcSestas(toMins(d.acordou), { ...planoAuto, sestas: d.planoSel === 'auto' ? planoAuto.sestas : parseInt(d.planoSel) }, d.realTimes) : null
-    const deitarF = c?.deitar ? Math.max(c.deitar, DEITAR_MINIMO) : null
+    const numS = d.planoSel === 'auto' ? planoAuto.sestas : parseInt(d.planoSel)
+    const c = calcSestas(toMins(d.acordou), { ...planoAuto, sestas: numS }, d.realTimes)
+    const df = c?.deitar ? Math.min(Math.max(c.deitar, deitarMin), deitarMax) : null
     const payload = {
-      acordou: d.acordou, plano: d.planoSel, dormiu: d.dormiu, obs: d.obs,
-      ...d.realTimes,
+      acordou: d.acordou, plano: d.planoSel, dormiu: d.dormiu, obs: d.obs, ...d.realTimes,
       alvo1: c?.sestas[0] ? fromMins(c.sestas[0].alvo) : '',
       alvo2: c?.sestas[1] ? fromMins(c.sestas[1].alvo) : '',
       alvo3: c?.sestas[2] ? fromMins(c.sestas[2].alvo) : '',
-      deitar: deitarF ? fromMins(deitarF) : '',
+      deitar: df ? fromMins(df) : '',
       alertas: c?.alertas || [],
     }
     const { error } = await sb.from('sleep_events').upsert({
@@ -108,15 +109,17 @@ export default function SonoPage() {
     setSyncState(error ? 'err' : 'ok')
   }
 
-  // Helpers que actualizam state E disparam save
-  const setAcordouAndSave = (v) => { setAcordou(v); triggerSave({ acordou: v }) }
-  const setPlanoAndSave   = (v) => { setPlanoSel(v); triggerSave({ planoSel: v }) }
-  const setObsAndSave     = (v) => { setObs(v); triggerSave({ obs: v }) }
-  const setDormiuAndSave  = (v) => { setDormiu(v); triggerSave({ dormiu: v }) }
+  const setAcordouAndSave = (v) => { setAcordou(v); setTimeout(triggerSave, 0) }
+  const setPlanoAndSave   = (v) => { setPlanoSel(v); setTimeout(triggerSave, 0) }
+  const setObsAndSave     = (v) => { setObs(v); setTimeout(triggerSave, 0) }
+  const setDormiuAndSave  = (v) => { setDormiu(v); setTimeout(triggerSave, 0) }
   const setRTAndSave      = (key, val) => {
-    const next = { ...realTimes, [key]: val }
-    setRealTimes(next)
-    triggerSave({ realTimes: next })
+    setRealTimes(prev => {
+      const next = { ...prev, [key]: val }
+      latestData.current = { ...latestData.current, realTimes: next }
+      setTimeout(triggerSave, 0)
+      return next
+    })
   }
 
   // ── Contador acordado ──────────────────────────────
@@ -124,18 +127,9 @@ export default function SonoPage() {
     clearInterval(awakeRef.current)
     const emSesta = [1,2,3].some(n => realTimes[`s${n}_ini`] && !realTimes[`s${n}_fim`])
     if (emSesta || activeTimer) { setAwakeSecs(null); return }
-
-    const ultimoFim = (() => {
-      for (const n of [3,2,1]) {
-        const fim = realTimes[`s${n}_fim`]
-        if (fim) return horaToMs(fim)
-      }
-      return null
-    })()
-
+    const ultimoFim = (() => { for (const n of [3,2,1]) { const f = realTimes[`s${n}_fim`]; if (f) return horaToMs(f) } return null })()
     const refMs = ultimoFim || horaToMs(acordou)
     if (!refMs) { setAwakeSecs(null); return }
-
     const tick = () => setAwakeSecs(Math.max(0, Math.floor((Date.now() - refMs) / 1000)))
     tick()
     awakeRef.current = setInterval(tick, 15000)
@@ -153,28 +147,27 @@ export default function SonoPage() {
   }, [activeTimer])
 
   const iniciarSesta = (n) => {
-    const now = nowHHMM()
-    setRTAndSave(`s${n}_ini`, now)
+    setRTAndSave(`s${n}_ini`, nowHHMM())
     setActiveTimer({ sesta: n, startMs: Date.now() })
   }
 
   const terminarSesta = (n) => {
-    const now = nowHHMM()
-    setRTAndSave(`s${n}_fim`, now)
+    setRTAndSave(`s${n}_fim`, nowHHMM())
     setActiveTimer(null)
   }
 
-  // ── Apagar sesta ───────────────────────────────────
   const confirmarApagarSesta = (n) => {
-    const next = { ...realTimes, [`s${n}_ini`]: '', [`s${n}_fim`]: '' }
-    setRealTimes(next)
     if (activeTimer?.sesta === n) { clearInterval(timerRef.current); setActiveTimer(null) }
-    triggerSave({ realTimes: next })
+    setRealTimes(prev => {
+      const next = { ...prev, [`s${n}_ini`]: '', [`s${n}_fim`]: '' }
+      latestData.current = { ...latestData.current, realTimes: next }
+      setTimeout(triggerSave, 0)
+      return next
+    })
     setDeleteNap(null)
     showToast('Sesta apagada')
   }
 
-  // Cor do contador acordado
   const awakeColor = awakeSecs == null ? null
     : awakeSecs < 7200  ? { bg:'rgba(168,197,171,0.15)', border:'rgba(122,158,126,0.3)', text:'var(--sage)',   msg:'Dentro da janela normal' }
     : awakeSecs < 10800 ? { bg:'rgba(245,216,122,0.15)', border:'rgba(196,162,64,0.35)',  text:'var(--warn)',   msg:'A aproximar do limite' }
@@ -189,7 +182,7 @@ export default function SonoPage() {
   return (
     <div className="page-content">
 
-      {/* Estado actual — contador acordado */}
+      {/* Contador acordado */}
       {awakeSecs !== null && awakeColor && (
         <div style={{ display:'flex', alignItems:'center', gap:10, background:awakeColor.bg, border:`1px solid ${awakeColor.border}`, borderRadius:12, padding:'12px 16px', marginBottom:12 }}>
           <span style={{ fontSize:22 }}>☀️</span>
@@ -198,24 +191,24 @@ export default function SonoPage() {
             <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{awakeColor.msg}</div>
           </div>
           <div style={{ fontSize:11, color:'var(--muted)', textAlign:'right' }}>
-            {calc?.deitar ? <>Deitar ~<br/><strong style={{color:'var(--sage)', fontSize:13}}>{fromMins(deitarFinal)}</strong></> : null}
+            Deitar<br/><strong style={{ color:'var(--sage)', fontSize:13 }}>{fromMins(deitarMin)}–{fromMins(deitarMax)}</strong>
           </div>
         </div>
       )}
 
-      {/* Plano evolutivo */}
+      {/* Plano */}
       <div className="alert alert-info" style={{ marginBottom:12 }}>
-        🌱 <span><strong>{planoAuto.label}</strong> — {planoAuto.desc}</span>
+        🌱 <span><strong>{planoAuto.label}</strong>{sestaFacultativa ? ' · sesta facultativa' : ''} — {planoAuto.desc}</span>
       </div>
 
-      {/* Alertas */}
-      {calc?.alertas?.map((a, i) => (
-        <div key={i} className="alert alert-warn">⚠️ {a}</div>
-      ))}
+      {calc?.alertas?.map((a, i) => <div key={i} className="alert alert-warn">⚠️ {a}</div>)}
 
       {/* Dados do dia */}
       <div className="card">
-        <div className="card-title">📅 Hoje <span style={{fontSize:10, color:'var(--sage)', fontStyle:'normal', marginLeft:6}}>✓ guarda automaticamente</span></div>
+        <div className="card-title">
+          📅 Hoje
+          <span style={{ fontSize:10, color:'var(--sage)', fontStyle:'normal', marginLeft:6 }}>✓ guarda automaticamente</span>
+        </div>
         <div className="field-row">
           <div className="field-label">Acordou</div>
           <input type="time" value={acordou} onChange={e => setAcordouAndSave(e.target.value)} style={{ width:'auto', minWidth:110 }} />
@@ -227,12 +220,13 @@ export default function SonoPage() {
             <option value="3">3 sestas</option>
             <option value="2">2 sestas</option>
             <option value="1">1 sesta</option>
+            {sestaFacultativa && <option value="0">Sem sesta hoje</option>}
           </select>
         </div>
       </div>
 
       {/* Sestas */}
-      {Array.from({ length: numSestas }, (_, idx) => {
+      {numSestas > 0 && Array.from({ length: numSestas }, (_, idx) => {
         const n = idx + 1
         const s = calc?.sestas[idx]
         const ini = realTimes[`s${n}_ini`]
@@ -243,13 +237,13 @@ export default function SonoPage() {
         return (
           <div key={n} style={{ background:'var(--warm)', border:'1px solid var(--border)', borderRadius:14, padding:'13px 14px', marginBottom:10 }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
-              <span style={{ fontSize:13, fontWeight:600, color:'var(--earth)' }}>{n}ª Sesta</span>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <span style={{ fontSize:13, fontWeight:600, color:'var(--earth)' }}>{n}ª Sesta</span>
+                {sestaFacultativa && <span style={{ fontSize:10, color:'var(--muted)', background:'var(--sand)', borderRadius:4, padding:'1px 5px' }}>facultativa</span>}
+              </div>
               <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                {s && <span style={{ fontFamily:'monospace', fontSize:13, fontWeight:600, background:'white', color:'var(--sage)', border:'1px solid var(--sage-light)', borderRadius:8, padding:'3px 9px' }}>
-                  ⏰ {fromMins(s.alvo)}
-                </span>}
+                {s && <span style={{ fontFamily:'monospace', fontSize:13, fontWeight:600, background:'white', color:'var(--sage)', border:'1px solid var(--sage-light)', borderRadius:8, padding:'3px 9px' }}>⏰ {fromMins(s.alvo)}</span>}
                 <span style={{ fontSize:11, color:'var(--muted)', background:'white', border:'1px solid var(--border)', borderRadius:6, padding:'3px 7px' }}>~{s?.durAlvo ? formatDur(s.durAlvo) : '–'}</span>
-                {/* Botão apagar sesta */}
                 {temRegisto && (
                   <button onClick={() => setDeleteNap(n)} style={{ padding:'3px 8px', borderRadius:6, border:'1px solid rgba(192,97,78,0.3)', background:'rgba(192,97,78,0.06)', color:'var(--danger)', fontSize:11, cursor:'pointer', fontFamily:'inherit' }}>✕</button>
                 )}
@@ -277,7 +271,7 @@ export default function SonoPage() {
                 <button onClick={() => terminarSesta(n)} style={{ flex:1, padding:'8px', borderRadius:8, border:'1px solid rgba(192,97,78,0.3)', background:'rgba(192,97,78,0.08)', color:'var(--danger)', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>⏹ Acordou</button>
               )}
               {ini && !isActive && !fim && (
-                <button onClick={() => { setRTAndSave(`s${n}_fim`, nowHHMM()) }} style={{ flex:1, padding:'8px', borderRadius:8, border:'1px solid rgba(122,158,126,0.3)', background:'rgba(122,158,126,0.08)', color:'var(--sage)', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>✓ Acordou agora</button>
+                <button onClick={() => setRTAndSave(`s${n}_fim`, nowHHMM())} style={{ flex:1, padding:'8px', borderRadius:8, border:'1px solid rgba(122,158,126,0.3)', background:'rgba(122,158,126,0.08)', color:'var(--sage)', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>✓ Acordou agora</button>
               )}
             </div>
 
@@ -292,11 +286,18 @@ export default function SonoPage() {
       })}
 
       {/* Deitar */}
-      {deitarFinal && (
+      {(deitarFinal || acordou) && (
         <div style={{ background:'linear-gradient(135deg, #7a9e7e 0%, #5a8a7a 100%)', borderRadius:16, padding:'18px 20px', marginBottom:12, display:'flex', alignItems:'center', justifyContent:'space-between', boxShadow:'0 4px 20px rgba(122,158,126,0.25)' }}>
           <div>
-            <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.6px', color:'rgba(255,255,255,0.7)', marginBottom:4 }}>Deitar — alvo</div>
-            <div style={{ fontFamily:'Fraunces, serif', fontSize:36, fontWeight:300, color:'white', letterSpacing:-1 }}>{fromMins(deitarFinal)}</div>
+            <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.6px', color:'rgba(255,255,255,0.7)', marginBottom:4 }}>Deitar — janela</div>
+            <div style={{ fontFamily:'Fraunces, serif', fontSize:28, fontWeight:300, color:'white' }}>
+              {fromMins(deitarMin)} – {fromMins(deitarMax)}
+            </div>
+            {deitarFinal && (
+              <div style={{ fontSize:12, color:'rgba(255,255,255,0.75)', marginTop:4 }}>
+                Sugestão hoje: <strong>{fromMins(deitarFinal)}</strong>
+              </div>
+            )}
           </div>
           <div style={{ fontSize:36, opacity:0.6 }}>🌙</div>
         </div>
