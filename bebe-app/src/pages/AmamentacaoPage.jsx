@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
-import { today, nowHHMM, fmtSecs } from '../lib/sleep'
+import { today } from '../lib/sleep'
 
 const LADO_LABELS = { E: 'Esquerdo', D: 'Direito', A: 'Ambos', M: 'Mamadeira' }
 
@@ -10,7 +10,16 @@ function fmtSinceShort(secs) {
   const m = Math.floor(secs / 60)
   const h = Math.floor(m / 60)
   if (h === 0) return `${m}min`
-  return `${h}h ${m % 60 > 0 ? m % 60 + 'min' : ''}`
+  return `${h}h${m % 60 > 0 ? ` ${m % 60}min` : ''}`
+}
+
+function fmtSecs(s) {
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
+}
+
+function nowHHMM() {
+  const d = new Date()
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
 }
 
 function horaToMs(hora) {
@@ -21,34 +30,69 @@ function horaToMs(hora) {
   return d.getTime()
 }
 
-export default function AmamentacaoPage() {
-  const { activeChild, profile, isParent, showToast } = useApp()
-  const [feeds, setFeeds]               = useState([])
-  const [timerActive, setTimerActive]   = useState(false)
-  const [timerStart, setTimerStart]     = useState(null)
-  const [timerSecs, setTimerSecs]       = useState(0)
-  const [lado, setLado]                 = useState(null)
-  const [sinceSecs, setSinceSecs]       = useState(null)
-  const timerRef  = useRef(null)
-  const sinceRef  = useRef(null)
+const TIMER_KEY = 'bebe_feed_timer'
 
+export default function AmamentacaoPage() {
+  const { activeChild, profile, session, showToast } = useApp()
+  const [feeds, setFeeds]             = useState([])
+  const [timerActive, setTimerActive] = useState(false)
+  const [timerStartMs, setTimerStartMs] = useState(null) // timestamp absoluto em ms
+  const [lado, setLado]               = useState(null)
+  const [elapsed, setElapsed]         = useState(0) // segundos desde timerStartMs
+  const [sinceSecs, setSinceSecs]     = useState(null)
+
+  const intervalRef = useRef(null)
+  const sinceRef    = useRef(null)
+
+  // Edit state
   const [editId, setEditId]         = useState(null)
   const [editHora, setEditHora]     = useState('')
   const [editDurMin, setEditDurMin] = useState('')
   const [editDurSec, setEditDurSec] = useState('')
   const [editLado, setEditLado]     = useState(null)
-  const [deleteId, setDeleteId]     = useState(null)
+
+  // Delete confirm
+  const [deleteId, setDeleteId] = useState(null)
+
+  // ── Restaurar timer do localStorage ao montar ─────
+  useEffect(() => {
+    const saved = localStorage.getItem(TIMER_KEY)
+    if (saved) {
+      try {
+        const { startMs, lado: savedLado } = JSON.parse(saved)
+        setTimerStartMs(startMs)
+        setLado(savedLado)
+        setTimerActive(true)
+      } catch (e) {
+        localStorage.removeItem(TIMER_KEY)
+      }
+    }
+  }, [])
 
   useEffect(() => { if (activeChild) loadFeeds() }, [activeChild])
-  useEffect(() => () => { clearInterval(timerRef.current); clearInterval(sinceRef.current) }, [])
+
+  useEffect(() => () => {
+    clearInterval(intervalRef.current)
+    clearInterval(sinceRef.current)
+  }, [])
 
   const loadFeeds = async () => {
     const { data } = await sb
-      .from('feeds').select('*, profiles(name)')
+      .from('feeds').select('*, profiles(name, id)')
       .eq('child_id', activeChild.id).eq('data_date', today())
       .order('created_at', { ascending: false })
     setFeeds(data || [])
   }
+
+  // ── Timer ao vivo — calcula sempre a partir de Date.now() - startMs ──
+  useEffect(() => {
+    clearInterval(intervalRef.current)
+    if (!timerActive || !timerStartMs) return
+    const tick = () => setElapsed(Math.floor((Date.now() - timerStartMs) / 1000))
+    tick()
+    intervalRef.current = setInterval(tick, 500) // 500ms para precisão
+    return () => clearInterval(intervalRef.current)
+  }, [timerActive, timerStartMs])
 
   // ── Contador "desde a última" ──────────────────────
   useEffect(() => {
@@ -61,29 +105,36 @@ export default function AmamentacaoPage() {
     if (!refMs) return
     const tick = () => setSinceSecs(Math.max(0, Math.floor((Date.now() - refMs) / 1000)))
     tick()
-    sinceRef.current = setInterval(tick, 10000)
+    sinceRef.current = setInterval(tick, 15000)
     return () => clearInterval(sinceRef.current)
   }, [feeds, timerActive])
 
-  // ── Timer ──────────────────────────────────────────
+  // ── Iniciar ────────────────────────────────────────
   const iniciar = (l) => {
     if (timerActive) return
-    setLado(l); setTimerActive(true); setTimerStart(Date.now()); setTimerSecs(0); setSinceSecs(null)
-    timerRef.current = setInterval(() => setTimerSecs(s => s + 1), 1000)
+    const startMs = Date.now()
+    setLado(l); setTimerStartMs(startMs); setTimerActive(true); setElapsed(0); setSinceSecs(null)
+    localStorage.setItem(TIMER_KEY, JSON.stringify({ startMs, lado: l }))
   }
 
+  // ── Terminar ───────────────────────────────────────
   const terminar = async () => {
-    if (!timerActive) return
-    clearInterval(timerRef.current)
-    const d = new Date(timerStart)
-    const hora = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')
+    if (!timerActive || !timerStartMs) return
+    clearInterval(intervalRef.current)
+    const duracao_seg = Math.floor((Date.now() - timerStartMs) / 1000)
+    const startDate = new Date(timerStartMs)
+    const hora = String(startDate.getHours()).padStart(2,'0') + ':' + String(startDate.getMinutes()).padStart(2,'0')
+
     const { error } = await sb.from('feeds').insert({
       child_id: activeChild.id, data_date: today(),
-      hora, duracao_seg: timerSecs, lado, recorded_by: profile?.id
+      hora, duracao_seg, lado, recorded_by: profile?.id
     })
-    if (!error) { showToast('Registado: ' + fmtSecs(timerSecs)); loadFeeds() }
+
+    localStorage.removeItem(TIMER_KEY)
+    setTimerActive(false); setTimerStartMs(null); setElapsed(0); setLado(null)
+
+    if (!error) { showToast('Registado: ' + fmtSecs(duracao_seg)); loadFeeds() }
     else showToast('Erro ao guardar')
-    setTimerActive(false); setTimerStart(null); setTimerSecs(0); setLado(null)
   }
 
   // ── Edit ───────────────────────────────────────────
@@ -96,7 +147,8 @@ export default function AmamentacaoPage() {
 
   const saveEdit = async () => {
     const duracao_seg = (parseInt(editDurMin) || 0) * 60 + (parseInt(editDurSec) || 0)
-    const { error } = await sb.from('feeds').update({ hora: editHora, duracao_seg, lado: editLado }).eq('id', editId)
+    const { error } = await sb.from('feeds')
+      .update({ hora: editHora, duracao_seg, lado: editLado }).eq('id', editId)
     if (!error) { showToast('Atualizado ✓'); setEditId(null); loadFeeds() }
     else showToast('Erro ao atualizar')
   }
@@ -108,14 +160,21 @@ export default function AmamentacaoPage() {
     else showToast('Erro ao apagar')
   }
 
-  const totalHoje = feeds.reduce((a, f) => a + (f.duracao_seg || 0), 0)
-  const canEdit = activeChild && isParent(activeChild.id)
+  // ── Permissões — pode editar se foi quem registou OU é pai/mãe ──
+  // Simplificado: qualquer utilizador autenticado pode editar/apagar
+  const canEditFeed = () => !!session
 
-  // Cor consoante tempo desde última: verde < 2h, amarelo 2-3h, vermelho > 3h
+  const totalHoje = feeds.reduce((a, f) => a + (f.duracao_seg || 0), 0)
+
   const sinceColor = sinceSecs == null ? 'rgba(255,255,255,0.6)'
     : sinceSecs < 7200  ? '#a8e6b4'
     : sinceSecs < 10800 ? '#f5d87a'
     : '#f5a0a0'
+
+  // Hora de início formatada para mostrar no timer
+  const timerInicioStr = timerStartMs
+    ? (() => { const d = new Date(timerStartMs); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') })()
+    : ''
 
   if (!activeChild) return (
     <div className="page-content">
@@ -134,7 +193,6 @@ export default function AmamentacaoPage() {
         boxShadow: '0 4px 20px rgba(143,179,200,0.3)'
       }}>
 
-        {/* Contador última amamentação */}
         {sinceSecs !== null && !timerActive && (
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -147,22 +205,21 @@ export default function AmamentacaoPage() {
         )}
 
         {feeds.length === 0 && !timerActive && (
-          <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 10 }}>
-            Sem registos hoje
-          </div>
+          <div style={{ fontSize: 12, opacity: 0.6, marginBottom: 10 }}>Sem registos hoje</div>
         )}
 
         <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.8px', opacity: 0.75 }}>
           {timerActive ? `A amamentar — ${LADO_LABELS[lado] || ''}` : 'Amamentação'}
         </div>
 
+        {/* Cronómetro — calcula sempre de Date.now() */}
         <div style={{ fontFamily: 'Fraunces, serif', fontSize: 56, fontWeight: 300, letterSpacing: -2, lineHeight: 1, margin: '14px 0' }}>
-          {fmtSecs(timerSecs)}
+          {fmtSecs(elapsed)}
         </div>
 
-        {timerActive && timerStart && (
+        {timerActive && timerInicioStr && (
           <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 14 }}>
-            Desde as {String(new Date(timerStart).getHours()).padStart(2,'0')}:{String(new Date(timerStart).getMinutes()).padStart(2,'0')}
+            Desde as {timerInicioStr}
           </div>
         )}
 
@@ -257,7 +314,7 @@ export default function AmamentacaoPage() {
                     {f.profiles?.name ? ' · ' + f.profiles.name : ''}
                   </div>
                 </div>
-                {canEdit && (
+                {canEditFeed() && (
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => openEdit(f)} style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--warm)', color: 'var(--earth)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>✏️</button>
                     <button onClick={() => setDeleteId(f.id)} style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid rgba(192,97,78,0.3)', background: 'rgba(192,97,78,0.06)', color: 'var(--danger)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>🗑</button>
