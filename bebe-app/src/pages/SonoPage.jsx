@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { sb } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
+import { getUltimaAlimentacao, fmtSinceShort } from '../lib/feeding'
 import {
   getPlanoByWeeks, getWeeks, calcSestas,
   fromMins, toMins, formatDur, today, nowHHMM, fmtSecs
@@ -34,10 +35,15 @@ export default function SonoPage() {
   const [awakeSecs, setAwakeSecs] = useState(null)
   const [deleteNap, setDeleteNap] = useState(null)
 
-  const timerRef   = useRef(null)
-  const awakeRef   = useRef(null)
-  const saveDebRef = useRef(null)
-  const latestData = useRef({})
+  // Última alimentação para mostrar no sono
+  const [ultimaAlim, setUltimaAlim] = useState(null)
+  const [ultimaAlimSecs, setUltimaAlimSecs] = useState(null)
+
+  const timerRef    = useRef(null)
+  const awakeRef    = useRef(null)
+  const alimentRef  = useRef(null)
+  const saveDebRef  = useRef(null)
+  const latestData  = useRef({})
 
   const child     = activeChild
   const semanas   = child ? getWeeks(child.birthdate) : 0
@@ -56,15 +62,19 @@ export default function SonoPage() {
     ? Math.min(Math.max(calc.deitar, deitarMin), deitarMax)
     : null
 
-  // ── Estado de sono nocturno ────────────────────────
-  // Se "dormiu às" está preenchido e não há "acordou" de hoje → está a dormir
-  // "acordou" é a hora em que acordou de manhã → termina o sono nocturno
-  const estADormir = dormiu && !acordou
+  // ── "Está a dormir" = dormiu preenchido E acordou vazio ──
+  // acordou = hora em que acordou de manhã (termina o sono nocturno)
+  // dormiu  = hora em que adormeceu à noite (inicia o sono nocturno)
+  const estADormirNoite = !!(dormiu && !acordou)
+
+  // ── Está numa sesta agora ──
+  const emSesta = [1,2,3].some(n => realTimes[`s${n}_ini`] && !realTimes[`s${n}_fim`])
 
   useEffect(() => { if (child) loadToday() }, [child])
   useEffect(() => () => {
     clearInterval(timerRef.current)
     clearInterval(awakeRef.current)
+    clearInterval(alimentRef.current)
     clearTimeout(saveDebRef.current)
   }, [])
 
@@ -79,7 +89,20 @@ export default function SonoPage() {
       setDormiu(p.dormiu || '')
       setObs(p.obs || '')
     }
+    // Carregar última alimentação
+    const ua = await getUltimaAlimentacao(child.id)
+    setUltimaAlim(ua)
   }
+
+  // ── Contador última alimentação ──────────────────────
+  useEffect(() => {
+    clearInterval(alimentRef.current)
+    if (!ultimaAlim) return
+    const tick = () => setUltimaAlimSecs(Math.max(0, Math.floor((Date.now() - ultimaAlim.ms) / 1000)))
+    tick()
+    alimentRef.current = setInterval(tick, 15000)
+    return () => clearInterval(alimentRef.current)
+  }, [ultimaAlim])
 
   // ── Auto-save debounce 2s ──────────────────────────
   const triggerSave = useCallback(() => {
@@ -126,19 +149,33 @@ export default function SonoPage() {
   }
 
   // ── Contador acordado ──────────────────────────────
+  // Só mostra se: NÃO está a dormir de noite, NÃO está numa sesta, NÃO tem timer activo
   useEffect(() => {
     clearInterval(awakeRef.current)
-    if (estADormir) { setAwakeSecs(null); return }
-    const emSesta = [1,2,3].some(n => realTimes[`s${n}_ini`] && !realTimes[`s${n}_fim`])
-    if (emSesta || activeTimer) { setAwakeSecs(null); return }
-    const ultimoFim = (() => { for (const n of [3,2,1]) { const f = realTimes[`s${n}_fim`]; if (f) return horaToMs(f) } return null })()
+
+    // Se está a dormir de noite ou numa sesta → não mostrar
+    if (estADormirNoite || emSesta || activeTimer) {
+      setAwakeSecs(null)
+      return
+    }
+
+    // Referência: fim da última sesta ou hora de acordar
+    const ultimoFim = (() => {
+      for (const n of [3,2,1]) {
+        const f = realTimes[`s${n}_fim`]
+        if (f) return horaToMs(f)
+      }
+      return null
+    })()
+
     const refMs = ultimoFim || horaToMs(acordou)
     if (!refMs) { setAwakeSecs(null); return }
+
     const tick = () => setAwakeSecs(Math.max(0, Math.floor((Date.now() - refMs) / 1000)))
     tick()
     awakeRef.current = setInterval(tick, 15000)
     return () => clearInterval(awakeRef.current)
-  }, [acordou, realTimes, activeTimer, estADormir])
+  }, [acordou, realTimes, activeTimer, estADormirNoite, emSesta])
 
   // ── Timer sesta ────────────────────────────────────
   useEffect(() => {
@@ -172,15 +209,17 @@ export default function SonoPage() {
     showToast('Sesta apagada')
   }
 
-  const limparDormiu = () => {
-    setDormiuAndSave('')
-    showToast('Hora de dormir apagada')
-  }
+  const limparDormiu = () => { setDormiuAndSave(''); showToast('Hora de dormir apagada') }
 
   const awakeColor = awakeSecs == null ? null
     : awakeSecs < 7200  ? { bg:'rgba(168,197,171,0.15)', border:'rgba(122,158,126,0.3)', text:'var(--sage)',   msg:'Dentro da janela normal' }
     : awakeSecs < 10800 ? { bg:'rgba(245,216,122,0.15)', border:'rgba(196,162,64,0.35)',  text:'var(--warn)',   msg:'A aproximar do limite' }
     :                     { bg:'rgba(232,165,152,0.15)', border:'rgba(232,165,152,0.4)',   text:'var(--danger)', msg:'Pode estar com sono!' }
+
+  const alimentColor = ultimaAlimSecs == null ? null
+    : ultimaAlimSecs < 7200  ? 'var(--sage)'
+    : ultimaAlimSecs < 10800 ? 'var(--warn)'
+    : 'var(--danger)'
 
   if (!child) return (
     <div className="page-content">
@@ -192,17 +231,28 @@ export default function SonoPage() {
     <div className="page-content">
 
       {/* A dormir (sono nocturno) */}
-      {estADormir && (
-        <div style={{ display:'flex', alignItems:'center', gap:10, background:'rgba(106,174,200,0.1)', border:'1px solid rgba(106,174,200,0.3)', borderRadius:12, padding:'14px 16px', marginBottom:12 }}>
-          <span style={{ fontSize:28 }}>😴</span>
+      {estADormirNoite && (
+        <div style={{ display:'flex', alignItems:'center', gap:12, background:'rgba(106,174,200,0.1)', border:'1px solid rgba(106,174,200,0.3)', borderRadius:12, padding:'14px 16px', marginBottom:12 }}>
+          <span style={{ fontSize:28 }}>🌙</span>
           <div style={{ flex:1 }}>
             <div style={{ fontSize:15, fontWeight:700, color:'var(--sky)' }}>A dormir desde as {dormiu}</div>
-            <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>Regista a hora de acordar quando acordar</div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>Preenche "Acordou" quando acordar de manhã</div>
           </div>
         </div>
       )}
 
-      {/* Contador acordado */}
+      {/* Numa sesta agora */}
+      {emSesta && !estADormirNoite && (
+        <div style={{ display:'flex', alignItems:'center', gap:12, background:'rgba(106,174,200,0.1)', border:'1px solid rgba(106,174,200,0.25)', borderRadius:12, padding:'14px 16px', marginBottom:12 }}>
+          <span style={{ fontSize:28 }}>😴</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:15, fontWeight:700, color:'var(--sky)' }}>A dormir a sesta</div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>Timer activo abaixo</div>
+          </div>
+        </div>
+      )}
+
+      {/* Contador acordado — só quando acordado */}
       {awakeSecs !== null && awakeColor && (
         <div style={{ display:'flex', alignItems:'center', gap:10, background:awakeColor.bg, border:`1px solid ${awakeColor.border}`, borderRadius:12, padding:'12px 16px', marginBottom:12 }}>
           <span style={{ fontSize:22 }}>☀️</span>
@@ -212,6 +262,20 @@ export default function SonoPage() {
           </div>
           <div style={{ fontSize:11, color:'var(--muted)', textAlign:'right' }}>
             Deitar<br/><strong style={{ color:'var(--sage)', fontSize:13 }}>{fromMins(deitarMin)}–{fromMins(deitarMax)}</strong>
+          </div>
+        </div>
+      )}
+
+      {/* Última alimentação */}
+      {ultimaAlim && ultimaAlimSecs !== null && (
+        <div style={{ display:'flex', alignItems:'center', gap:10, background:'rgba(255,255,255,0.03)', border:'1px solid var(--border)', borderRadius:12, padding:'10px 16px', marginBottom:12 }}>
+          <span style={{ fontSize:18 }}>🍽️</span>
+          <div style={{ flex:1, fontSize:13, color:'var(--muted)' }}>
+            <span style={{ color: alimentColor, fontWeight:600 }}>
+              {ultimaAlim.tipo} há {fmtSinceShort(ultimaAlimSecs)}
+            </span>
+            {ultimaAlim.detalhe ? <span> · {ultimaAlim.detalhe}</span> : null}
+            <span style={{ fontSize:11 }}> · às {ultimaAlim.hora}</span>
           </div>
         </div>
       )}
@@ -230,10 +294,7 @@ export default function SonoPage() {
           <span style={{ fontSize:10, color:'var(--sage)', fontStyle:'normal', marginLeft:6 }}>✓ guarda automaticamente</span>
         </div>
         <div className="field-row">
-          <div className="field-label">
-            Acordou
-            <small>hora em que acordou de manhã</small>
-          </div>
+          <div className="field-label">Acordou<small>hora em que acordou de manhã</small></div>
           <input type="time" value={acordou} onChange={e => setAcordouAndSave(e.target.value)} style={{ width:'auto', minWidth:110 }} />
         </div>
         <div className="field-row">
@@ -248,7 +309,7 @@ export default function SonoPage() {
         </div>
       </div>
 
-      {/* Sestas — só mostrar se já acordou */}
+      {/* Sestas — só se acordou */}
       {acordou && numSestas > 0 && Array.from({ length: numSestas }, (_, idx) => {
         const n = idx + 1
         const s = calc?.sestas[idx]
@@ -324,10 +385,7 @@ export default function SonoPage() {
       <div className="card">
         <div style={{ marginBottom:12 }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
-            <div className="field-label">
-              Dormiu às
-              <small>hora em que adormeceuu à noite</small>
-            </div>
+            <div className="field-label">Dormiu às<small>hora em que adormeceu à noite</small></div>
             {dormiu && (
               <button onClick={limparDormiu} style={{ fontSize:11, color:'var(--danger)', background:'rgba(192,97,78,0.08)', border:'1px solid rgba(192,97,78,0.25)', borderRadius:6, padding:'3px 8px', cursor:'pointer', fontFamily:'inherit' }}>
                 ✕ Apagar
