@@ -4,7 +4,7 @@ import { sb } from './lib/supabase'
 import AuthPage from './pages/AuthPage'
 import SonoPage from './pages/SonoPage'
 import AmamentacaoPage from './pages/AmamentacaoPage'
-import RefeicoesPage from './pages/RefeicoesPage'
+import AlimentacaoPage from './pages/AlimentacaoPage'
 import MedicoPage from './pages/MedicoPage'
 import HistoricoPage from './pages/HistoricoPage'
 import PerfilPage from './pages/PerfilPage'
@@ -13,7 +13,7 @@ import { getAgeLabel, getWeeks } from './lib/sleep'
 const NAV = [
   { key: 'sono',      icon: '🌙', label: 'Sono' },
   { key: 'mamadas',   icon: '🤱', label: 'Amamentação' },
-  { key: 'refeicoes', icon: '🥣', label: 'Refeições' },
+  { key: 'alimentacao', icon: '🍽️', label: 'Alimentação' },
   { key: 'medico',    icon: '🩺', label: 'Saúde' },
   { key: 'historico', icon: '📋', label: 'Histórico' },
   { key: 'perfil',    icon: '👤', label: 'Perfil' },
@@ -27,7 +27,7 @@ function AppShell() {
   const semanas = activeChild ? getWeeks(activeChild.birthdate) : 0
   const ageLabel = activeChild ? getAgeLabel(activeChild.birthdate) : ''
 
-  const PAGES = { sono: SonoPage, mamadas: AmamentacaoPage, refeicoes: RefeicoesPage, medico: MedicoPage, historico: HistoricoPage, perfil: PerfilPage }
+  const PAGES = { sono: SonoPage, mamadas: AmamentacaoPage, alimentacao: AlimentacaoPage, medico: MedicoPage, historico: HistoricoPage, perfil: PerfilPage }
   const CurrentPage = PAGES[page]
 
   return (
