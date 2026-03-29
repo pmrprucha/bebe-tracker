@@ -4,16 +4,17 @@ import { useApp } from '../lib/AppContext'
 import { today, nowHHMM } from '../lib/sleep'
 
 const RATINGS = [
-  { value: 'bem',    label: 'Correu bem',    icon: '😊', color: '#7a9e7e' },
-  { value: 'normal', label: 'Normal',        icon: '😐', color: '#c4a882' },
-  { value: 'mal',    label: 'Correu mal',    icon: '😞', color: '#c06050' },
+  { value: 'bem',    label: 'Bem',    icon: '😊', color: '#7a9e7e' },
+  { value: 'normal', label: 'Normal', icon: '😐', color: '#c4a882' },
+  { value: 'mal',    label: 'Mal',    icon: '😞', color: '#c06050' },
 ]
 
-function fmtSinceShort(secs) {
+const LADO_PT = { E:'Esquerdo', D:'Direito', A:'Ambos', M:'Mamadeira' }
+
+function fmtSince(secs) {
   if (!secs || secs < 0) return null
   if (secs < 60) return `${secs}s`
-  const m = Math.floor(secs / 60)
-  const h = Math.floor(m / 60)
+  const m = Math.floor(secs / 60), h = Math.floor(m / 60)
   if (h === 0) return `${m}min`
   return `${h}h${m % 60 > 0 ? ` ${m % 60}min` : ''}`
 }
@@ -21,23 +22,21 @@ function fmtSinceShort(secs) {
 function horaToMs(hora) {
   if (!hora) return null
   const [h, m] = hora.split(':').map(Number)
-  const d = new Date()
-  d.setHours(h, m, 0, 0)
-  return d.getTime()
+  const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime()
 }
 
 export default function AlimentacaoPage() {
   const { activeChild, profile, session, showToast } = useApp()
   const [meals, setMeals]         = useState([])
-  const [sinceSecs, setSinceSecs] = useState(null)
-  const sinceRef = useRef(null)
+  const [ultimaAlim, setUltimaAlim] = useState(null) // { ms, tipo, detalhe, hora }
+  const [ultimaSecs, setUltimaSecs] = useState(null)
 
-  // Form novo registo
+  // Form
   const [showForm, setShowForm]   = useState(false)
   const [formHora, setFormHora]   = useState(nowHHMM())
   const [formObs, setFormObs]     = useState('')
   const [formRating, setFormRating] = useState(null)
-  const [formPhoto, setFormPhoto] = useState(null) // File
+  const [formPhoto, setFormPhoto] = useState(null)
   const [formPhotoPreview, setFormPhotoPreview] = useState(null)
   const [saving, setSaving]       = useState(false)
 
@@ -50,34 +49,73 @@ export default function AlimentacaoPage() {
   // Delete
   const [deleteId, setDeleteId]   = useState(null)
 
-  useEffect(() => { if (activeChild) loadMeals() }, [activeChild])
+  const sinceRef = useRef(null)
+
+  useEffect(() => { if (activeChild) { loadMeals(); calcUltimaAlim() } }, [activeChild])
   useEffect(() => () => clearInterval(sinceRef.current), [])
 
   const loadMeals = async () => {
-    const { data } = await sb
-      .from('meals').select('*, profiles(name)')
+    const { data } = await sb.from('meals').select('*, profiles(name)')
       .eq('child_id', activeChild.id).eq('data_date', today())
       .order('hora', { ascending: false })
     setMeals(data || [])
   }
 
-  // ── Contador "última refeição" ─────────────────────
+  // ── Calcular última alimentação: amamentação OU refeição ──
+  const calcUltimaAlim = async () => {
+    const [feedsRes, mealsRes] = await Promise.all([
+      sb.from('feeds').select('hora, duracao_seg, lado, created_at')
+        .eq('child_id', activeChild.id).eq('data_date', today())
+        .order('created_at', { ascending: false }).limit(1),
+      sb.from('meals').select('hora, obs, descricao')
+        .eq('child_id', activeChild.id).eq('data_date', today())
+        .order('hora', { ascending: false }).limit(1)
+    ])
+
+    let candidates = []
+
+    const feed = feedsRes.data?.[0]
+    if (feed) {
+      const endMs = feed.created_at
+        ? new Date(feed.created_at).getTime() + (feed.duracao_seg || 0) * 1000
+        : horaToMs(feed.hora)
+      if (endMs) candidates.push({
+        ms: endMs,
+        tipo: 'Amamentação',
+        detalhe: feed.lado ? (LADO_PT[feed.lado] || feed.lado) : '',
+        hora: feed.hora
+      })
+    }
+
+    const meal = mealsRes.data?.[0]
+    if (meal) {
+      const mealMs = horaToMs(meal.hora)
+      if (mealMs) candidates.push({
+        ms: mealMs,
+        tipo: 'Refeição',
+        detalhe: meal.obs || meal.descricao || '',
+        hora: meal.hora
+      })
+    }
+
+    if (!candidates.length) { setUltimaAlim(null); return }
+    const best = candidates.reduce((a, b) => a.ms > b.ms ? a : b)
+    setUltimaAlim(best)
+  }
+
+  // ── Contador ao vivo ───────────────────────────────
   useEffect(() => {
     clearInterval(sinceRef.current)
-    if (!meals.length) { setSinceSecs(null); return }
-    const ultima = meals[0]
-    const refMs = horaToMs(ultima.hora)
-    if (!refMs) return
-    const tick = () => setSinceSecs(Math.max(0, Math.floor((Date.now() - refMs) / 1000)))
+    if (!ultimaAlim) { setUltimaSecs(null); return }
+    const tick = () => setUltimaSecs(Math.max(0, Math.floor((Date.now() - ultimaAlim.ms) / 1000)))
     tick()
     sinceRef.current = setInterval(tick, 15000)
     return () => clearInterval(sinceRef.current)
-  }, [meals])
+  }, [ultimaAlim])
 
   // ── Foto ───────────────────────────────────────────
   const handlePhotoChange = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
+    const file = e.target.files[0]; if (!file) return
     setFormPhoto(file)
     const reader = new FileReader()
     reader.onload = (ev) => setFormPhotoPreview(ev.target.result)
@@ -94,58 +132,48 @@ export default function AlimentacaoPage() {
     return data.publicUrl
   }
 
-  // ── Guardar novo ───────────────────────────────────
+  // ── Guardar ────────────────────────────────────────
   const guardar = async () => {
     setSaving(true)
     let photo_url = null
     if (formPhoto) photo_url = await uploadPhoto(formPhoto)
-
     const { error } = await sb.from('meals').insert({
-      child_id: activeChild.id,
-      data_date: today(),
-      hora: formHora,
-      descricao: formObs || '–',
-      obs: formObs,
-      rating: formRating,
-      photo_url,
-      recorded_by: profile?.id
+      child_id: activeChild.id, data_date: today(),
+      hora: formHora, descricao: formObs || '–', obs: formObs,
+      rating: formRating, photo_url, recorded_by: profile?.id
     })
     setSaving(false)
     if (!error) {
       showToast('Refeição guardada ✓')
       setShowForm(false)
       setFormObs(''); setFormRating(null); setFormPhoto(null); setFormPhotoPreview(null); setFormHora(nowHHMM())
-      loadMeals()
-    } else {
-      showToast('Erro ao guardar')
-    }
+      loadMeals(); calcUltimaAlim()
+    } else showToast('Erro ao guardar')
   }
 
   // ── Edit ───────────────────────────────────────────
   const openEdit = (m) => {
     setEditId(m.id); setEditHora(m.hora||''); setEditObs(m.obs||''); setEditRating(m.rating||null)
   }
-
   const saveEdit = async () => {
     const { error } = await sb.from('meals')
       .update({ hora: editHora, obs: editObs, descricao: editObs||'–', rating: editRating }).eq('id', editId)
-    if (!error) { showToast('Atualizado ✓'); setEditId(null); loadMeals() }
+    if (!error) { showToast('Atualizado ✓'); setEditId(null); loadMeals(); calcUltimaAlim() }
     else showToast('Erro ao atualizar')
   }
 
   // ── Delete ─────────────────────────────────────────
   const confirmDelete = async () => {
     const { error } = await sb.from('meals').delete().eq('id', deleteId)
-    if (!error) { showToast('Apagado'); setDeleteId(null); loadMeals() }
+    if (!error) { showToast('Apagado'); setDeleteId(null); loadMeals(); calcUltimaAlim() }
     else showToast('Erro ao apagar')
   }
 
-  const sinceColor = sinceSecs == null ? null
-    : sinceSecs < 7200  ? { text:'var(--sage)',   bg:'rgba(168,197,171,0.12)' }
-    : sinceSecs < 14400 ? { text:'var(--warn)',   bg:'rgba(196,162,64,0.12)' }
-    :                     { text:'var(--danger)', bg:'rgba(232,165,152,0.12)' }
-
-  const sinceStr = fmtSinceShort(sinceSecs)
+  // Cor do contador
+  const sinceColor = ultimaSecs == null ? null
+    : ultimaSecs < 7200  ? 'var(--sage)'
+    : ultimaSecs < 10800 ? 'var(--warn)'
+    : 'var(--danger)'
 
   if (!activeChild) return (
     <div className="page-content">
@@ -156,25 +184,30 @@ export default function AlimentacaoPage() {
   return (
     <div className="page-content">
 
-      {/* Banner última refeição */}
-      {sinceStr && sinceColor && (
-        <div style={{ display:'flex', alignItems:'center', gap:10, background:sinceColor.bg, border:`1px solid ${sinceColor.text}30`, borderRadius:12, padding:'11px 16px', marginBottom:12 }}>
-          <span style={{ fontSize:20 }}>🍽️</span>
-          <div>
-            <div style={{ fontSize:13, fontWeight:600, color:sinceColor.text }}>Última refeição há {sinceStr}</div>
-            <div style={{ fontSize:11, color:'var(--muted)' }}>{meals[0]?.hora} · {meals[0]?.obs || '–'}</div>
+      {/* Banner última alimentação */}
+      {ultimaAlim && ultimaSecs !== null && (
+        <div style={{ display:'flex', alignItems:'center', gap:12, background:'rgba(255,255,255,0.04)', border:'1px solid var(--border)', borderRadius:12, padding:'13px 16px', marginBottom:12 }}>
+          <span style={{ fontSize:22 }}>🍽️</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:14, fontWeight:600, color: sinceColor }}>
+              {ultimaAlim.tipo} há {fmtSince(ultimaSecs)}
+            </div>
+            {ultimaAlim.detalhe && (
+              <div style={{ fontSize:12, color:'var(--muted)', marginTop:2 }}>{ultimaAlim.detalhe}</div>
+            )}
           </div>
+          <div style={{ fontSize:12, color:'var(--muted)', textAlign:'right' }}>às {ultimaAlim.hora}</div>
         </div>
       )}
 
-      {/* Botão novo */}
+      {/* Botão novo registo */}
       {!showForm && (
         <button className="btn btn-primary" onClick={() => { setShowForm(true); setFormHora(nowHHMM()) }} style={{ marginBottom:12 }}>
           + Registar refeição
         </button>
       )}
 
-      {/* Form novo registo */}
+      {/* Form */}
       {showForm && (
         <div className="card" style={{ marginBottom:12 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
@@ -194,7 +227,7 @@ export default function AlimentacaoPage() {
                 <button key={r.value} onClick={() => setFormRating(formRating === r.value ? null : r.value)} style={{
                   flex:1, padding:'10px 4px', borderRadius:10, border:'1px solid',
                   borderColor: formRating === r.value ? r.color : 'var(--border)',
-                  background: formRating === r.value ? r.color + '18' : 'var(--warm)',
+                  background: formRating === r.value ? r.color+'18' : 'var(--warm)',
                   cursor:'pointer', fontFamily:'inherit', textAlign:'center'
                 }}>
                   <div style={{ fontSize:22 }}>{r.icon}</div>
@@ -209,7 +242,6 @@ export default function AlimentacaoPage() {
             <textarea value={formObs} onChange={e => setFormObs(e.target.value)} placeholder="o que comeu, quantidade, reacções…" style={{ minHeight:60 }} />
           </div>
 
-          {/* Foto */}
           <div style={{ marginBottom:14 }}>
             <div style={{ fontSize:12, color:'var(--muted)', marginBottom:6 }}>Foto (opcional)</div>
             {formPhotoPreview ? (
@@ -260,11 +292,9 @@ export default function AlimentacaoPage() {
                       <button key={r.value} onClick={() => setEditRating(editRating === r.value ? null : r.value)} style={{
                         flex:1, padding:'8px 4px', borderRadius:10, border:'1px solid',
                         borderColor: editRating === r.value ? r.color : 'var(--border)',
-                        background: editRating === r.value ? r.color + '18' : 'var(--warm)',
+                        background: editRating === r.value ? r.color+'18' : 'var(--warm)',
                         cursor:'pointer', fontFamily:'inherit', textAlign:'center'
-                      }}>
-                        <div style={{ fontSize:18 }}>{r.icon}</div>
-                      </button>
+                      }}><div style={{ fontSize:18 }}>{r.icon}</div></button>
                     ))}
                   </div>
                   <textarea value={editObs} onChange={e => setEditObs(e.target.value)} placeholder="notas…" style={{ marginBottom:10, minHeight:50 }} />
@@ -275,7 +305,6 @@ export default function AlimentacaoPage() {
                 </div>
               ) : (
                 <div style={{ display:'flex', alignItems:'flex-start', gap:10 }}>
-                  {/* Foto miniatura */}
                   {m.photo_url && (
                     <img src={m.photo_url} alt="" style={{ width:48, height:48, borderRadius:8, objectFit:'cover', flexShrink:0 }} />
                   )}
