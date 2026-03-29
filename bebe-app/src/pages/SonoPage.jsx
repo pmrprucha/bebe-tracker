@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { sb } from '../lib/supabase'
 import { useApp } from '../lib/AppContext'
-import { getUltimaAlimentacao, fmtSinceShort } from '../lib/feeding'
 import {
   getPlanoByWeeks, getWeeks, calcSestas,
   fromMins, toMins, formatDur, today, nowHHMM, fmtSecs
@@ -23,35 +22,46 @@ function horaToMs(hora) {
   return d.getTime()
 }
 
+// Alertas só relevantes se o evento foi há menos de 2h
+function filterAlertas(alertas, realTimes) {
+  const now = Date.now()
+  return (alertas || []).filter(a => {
+    // Encontrar o timestamp mais recente de sesta
+    let lastEventMs = null
+    for (const n of [3, 2, 1]) {
+      const fim = realTimes[`s${n}_fim`]
+      if (fim) { lastEventMs = horaToMs(fim); break }
+    }
+    if (!lastEventMs) return true
+    // Só mostrar alerta se o evento foi há menos de 2h
+    return (now - lastEventMs) < 2 * 60 * 60 * 1000
+  })
+}
+
 export default function SonoPage() {
   const { activeChild, profile, showToast, setSyncState } = useApp()
-  const [acordou, setAcordou]     = useState('')
-  const [planoSel, setPlanoSel]   = useState('auto')
-  const [realTimes, setRealTimes] = useState({ s1_ini:'', s1_fim:'', s2_ini:'', s2_fim:'', s3_ini:'', s3_fim:'' })
-  const [dormiu, setDormiu]       = useState('')
-  const [obs, setObs]             = useState('')
+  const [acordou, setAcordou]       = useState('')
+  const [planoSel, setPlanoSel]     = useState('auto')
+  const [realTimes, setRealTimes]   = useState({ s1_ini:'', s1_fim:'', s2_ini:'', s2_fim:'', s3_ini:'', s3_fim:'' })
+  const [dormiu, setDormiu]         = useState('')
+  const [obs, setObs]               = useState('')
   const [activeTimer, setActiveTimer] = useState(null)
   const [timerDisplay, setTimerDisplay] = useState('00:00')
-  const [awakeSecs, setAwakeSecs] = useState(null)
-  const [deleteNap, setDeleteNap] = useState(null)
+  const [awakeSecs, setAwakeSecs]   = useState(null)
+  const [deleteNap, setDeleteNap]   = useState(null)
+  const [loadedDate, setLoadedDate] = useState(null) // data dos dados carregados
 
-  // Última alimentação para mostrar no sono
-  const [ultimaAlim, setUltimaAlim] = useState(null)
-  const [ultimaAlimSecs, setUltimaAlimSecs] = useState(null)
+  const timerRef   = useRef(null)
+  const awakeRef   = useRef(null)
+  const saveDebRef = useRef(null)
+  const latestData = useRef({})
 
-  const timerRef    = useRef(null)
-  const awakeRef    = useRef(null)
-  const alimentRef  = useRef(null)
-  const saveDebRef  = useRef(null)
-  const latestData  = useRef({})
-
-  const child     = activeChild
-  const semanas   = child ? getWeeks(child.birthdate) : 0
-  const planoAuto = getPlanoByWeeks(semanas)
-  const numSestas = planoSel === 'auto' ? planoAuto.sestas : parseInt(planoSel)
-
-  const deitarMin = child?.deitar_min ? toMins(child.deitar_min) : 19 * 60 + 30
-  const deitarMax = child?.deitar_max ? toMins(child.deitar_max) : 20 * 60
+  const child          = activeChild
+  const semanas        = child ? getWeeks(child.birthdate) : 0
+  const planoAuto      = getPlanoByWeeks(semanas)
+  const numSestas      = planoSel === 'auto' ? planoAuto.sestas : parseInt(planoSel)
+  const deitarMin      = child?.deitar_min ? toMins(child.deitar_min) : 19 * 60 + 30
+  const deitarMax      = child?.deitar_max ? toMins(child.deitar_max) : 20 * 60
   const sestaFacultativa = child?.sesta_facultativa ?? false
 
   const calc = acordou
@@ -62,25 +72,61 @@ export default function SonoPage() {
     ? Math.min(Math.max(calc.deitar, deitarMin), deitarMax)
     : null
 
-  // ── "Está a dormir" = dormiu preenchido E acordou vazio ──
-  // acordou = hora em que acordou de manhã (termina o sono nocturno)
-  // dormiu  = hora em que adormeceu à noite (inicia o sono nocturno)
-  const estADormirNoite = !!(dormiu && !acordou)
+  // Alertas filtrados — só os ainda relevantes
+  const alertasActivos = filterAlertas(calc?.alertas, realTimes)
 
-  // ── Está numa sesta agora ──
-  const emSesta = [1,2,3].some(n => realTimes[`s${n}_ini`] && !realTimes[`s${n}_fim`])
+  // ── Lógica de estado ───────────────────────────────────────────────
+  // dormiu preenchido + acordou vazio → sono nocturno em curso
+  const estADormirNoite = !!(dormiu && dormiu.trim() !== '' && (!acordou || acordou.trim() === ''))
+
+  // Sesta em curso: tem início mas não tem fim
+  const sestaAtiva = [1,2,3].find(n => realTimes[`s${n}_ini`] && !realTimes[`s${n}_fim`]) || null
+
+  // Acordado: tem hora de acordar, não está em sono nocturno, não está em sesta
+  const estaAcordado = !!(acordou && !estADormirNoite && !sestaAtiva && !activeTimer)
 
   useEffect(() => { if (child) loadToday() }, [child])
+
+  // ── Verificar se é novo dia ────────────────────────────────────────
+  // Se os dados carregados são de um dia diferente, limpar o formulário
+  useEffect(() => {
+    if (!loadedDate) return
+    if (loadedDate !== today()) {
+      // Novo dia — limpar tudo
+      setAcordou(''); setPlanoSel('auto')
+      setRealTimes({ s1_ini:'', s1_fim:'', s2_ini:'', s2_fim:'', s3_ini:'', s3_fim:'' })
+      setDormiu(''); setObs('')
+      setActiveTimer(null)
+      setLoadedDate(today())
+    }
+  }, [loadedDate])
+
+  // Verificar novo dia a cada minuto
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (loadedDate && loadedDate !== today()) {
+        setAcordou(''); setPlanoSel('auto')
+        setRealTimes({ s1_ini:'', s1_fim:'', s2_ini:'', s2_fim:'', s3_ini:'', s3_fim:'' })
+        setDormiu(''); setObs('')
+        setActiveTimer(null)
+        clearInterval(timerRef.current)
+        setLoadedDate(today())
+        showToast('Novo dia 🌅 — campos actualizados')
+      }
+    }, 60000)
+    return () => clearInterval(iv)
+  }, [loadedDate])
+
   useEffect(() => () => {
     clearInterval(timerRef.current)
     clearInterval(awakeRef.current)
-    clearInterval(alimentRef.current)
     clearTimeout(saveDebRef.current)
   }, [])
 
   const loadToday = async () => {
     const { data } = await sb.from('sleep_events').select('*')
       .eq('child_id', child.id).eq('data_date', today()).single()
+    setLoadedDate(today())
     if (data?.payload) {
       const p = data.payload
       setAcordou(p.acordou || '')
@@ -89,20 +135,7 @@ export default function SonoPage() {
       setDormiu(p.dormiu || '')
       setObs(p.obs || '')
     }
-    // Carregar última alimentação
-    const ua = await getUltimaAlimentacao(child.id)
-    setUltimaAlim(ua)
   }
-
-  // ── Contador última alimentação ──────────────────────
-  useEffect(() => {
-    clearInterval(alimentRef.current)
-    if (!ultimaAlim) return
-    const tick = () => setUltimaAlimSecs(Math.max(0, Math.floor((Date.now() - ultimaAlim.ms) / 1000)))
-    tick()
-    alimentRef.current = setInterval(tick, 15000)
-    return () => clearInterval(alimentRef.current)
-  }, [ultimaAlim])
 
   // ── Auto-save debounce 2s ──────────────────────────
   const triggerSave = useCallback(() => {
@@ -149,17 +182,11 @@ export default function SonoPage() {
   }
 
   // ── Contador acordado ──────────────────────────────
-  // Só mostra se: NÃO está a dormir de noite, NÃO está numa sesta, NÃO tem timer activo
   useEffect(() => {
     clearInterval(awakeRef.current)
+    // Só contar quando genuinamente acordado
+    if (!estaAcordado) { setAwakeSecs(null); return }
 
-    // Se está a dormir de noite ou numa sesta → não mostrar
-    if (estADormirNoite || emSesta || activeTimer) {
-      setAwakeSecs(null)
-      return
-    }
-
-    // Referência: fim da última sesta ou hora de acordar
     const ultimoFim = (() => {
       for (const n of [3,2,1]) {
         const f = realTimes[`s${n}_fim`]
@@ -175,7 +202,7 @@ export default function SonoPage() {
     tick()
     awakeRef.current = setInterval(tick, 15000)
     return () => clearInterval(awakeRef.current)
-  }, [acordou, realTimes, activeTimer, estADormirNoite, emSesta])
+  }, [estaAcordado, acordou, realTimes])
 
   // ── Timer sesta ────────────────────────────────────
   useEffect(() => {
@@ -216,11 +243,6 @@ export default function SonoPage() {
     : awakeSecs < 10800 ? { bg:'rgba(245,216,122,0.15)', border:'rgba(196,162,64,0.35)',  text:'var(--warn)',   msg:'A aproximar do limite' }
     :                     { bg:'rgba(232,165,152,0.15)', border:'rgba(232,165,152,0.4)',   text:'var(--danger)', msg:'Pode estar com sono!' }
 
-  const alimentColor = ultimaAlimSecs == null ? null
-    : ultimaAlimSecs < 7200  ? 'var(--sage)'
-    : ultimaAlimSecs < 10800 ? 'var(--warn)'
-    : 'var(--danger)'
-
   if (!child) return (
     <div className="page-content">
       <div className="empty-state"><div className="e-icon">👶</div><p>Adiciona uma criança para começar</p></div>
@@ -232,7 +254,7 @@ export default function SonoPage() {
 
       {/* A dormir (sono nocturno) */}
       {estADormirNoite && (
-        <div style={{ display:'flex', alignItems:'center', gap:12, background:'rgba(106,174,200,0.1)', border:'1px solid rgba(106,174,200,0.3)', borderRadius:12, padding:'14px 16px', marginBottom:12 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12, background:'rgba(20,30,60,0.4)', border:'1px solid rgba(106,174,200,0.3)', borderRadius:12, padding:'14px 16px', marginBottom:12 }}>
           <span style={{ fontSize:28 }}>🌙</span>
           <div style={{ flex:1 }}>
             <div style={{ fontSize:15, fontWeight:700, color:'var(--sky)' }}>A dormir desde as {dormiu}</div>
@@ -241,19 +263,19 @@ export default function SonoPage() {
         </div>
       )}
 
-      {/* Numa sesta agora */}
-      {emSesta && !estADormirNoite && (
-        <div style={{ display:'flex', alignItems:'center', gap:12, background:'rgba(106,174,200,0.1)', border:'1px solid rgba(106,174,200,0.25)', borderRadius:12, padding:'14px 16px', marginBottom:12 }}>
+      {/* A dormir (sesta) */}
+      {sestaAtiva && !estADormirNoite && (
+        <div style={{ display:'flex', alignItems:'center', gap:12, background:'rgba(106,174,200,0.08)', border:'1px solid rgba(106,174,200,0.25)', borderRadius:12, padding:'14px 16px', marginBottom:12 }}>
           <span style={{ fontSize:28 }}>😴</span>
           <div style={{ flex:1 }}>
-            <div style={{ fontSize:15, fontWeight:700, color:'var(--sky)' }}>A dormir a sesta</div>
+            <div style={{ fontSize:15, fontWeight:700, color:'var(--sky)' }}>A dormir a {sestaAtiva}ª sesta</div>
             <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>Timer activo abaixo</div>
           </div>
         </div>
       )}
 
-      {/* Contador acordado — só quando acordado */}
-      {awakeSecs !== null && awakeColor && (
+      {/* Contador acordado — APENAS quando estaAcordado é verdade */}
+      {estaAcordado && awakeSecs !== null && awakeColor && (
         <div style={{ display:'flex', alignItems:'center', gap:10, background:awakeColor.bg, border:`1px solid ${awakeColor.border}`, borderRadius:12, padding:'12px 16px', marginBottom:12 }}>
           <span style={{ fontSize:22 }}>☀️</span>
           <div style={{ flex:1 }}>
@@ -266,26 +288,15 @@ export default function SonoPage() {
         </div>
       )}
 
-      {/* Última alimentação */}
-      {ultimaAlim && ultimaAlimSecs !== null && (
-        <div style={{ display:'flex', alignItems:'center', gap:10, background:'rgba(255,255,255,0.03)', border:'1px solid var(--border)', borderRadius:12, padding:'10px 16px', marginBottom:12 }}>
-          <span style={{ fontSize:18 }}>🍽️</span>
-          <div style={{ flex:1, fontSize:13, color:'var(--muted)' }}>
-            <span style={{ color: alimentColor, fontWeight:600 }}>
-              {ultimaAlim.tipo} há {fmtSinceShort(ultimaAlimSecs)}
-            </span>
-            {ultimaAlim.detalhe ? <span> · {ultimaAlim.detalhe}</span> : null}
-            <span style={{ fontSize:11 }}> · às {ultimaAlim.hora}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Plano */}
+      {/* Plano evolutivo */}
       <div className="alert alert-info" style={{ marginBottom:12 }}>
         🌱 <span><strong>{planoAuto.label}</strong>{sestaFacultativa ? ' · sesta facultativa' : ''} — {planoAuto.desc}</span>
       </div>
 
-      {calc?.alertas?.map((a, i) => <div key={i} className="alert alert-warn">⚠️ {a}</div>)}
+      {/* Alertas — só os ainda relevantes */}
+      {alertasActivos.map((a, i) => (
+        <div key={i} className="alert alert-warn">⚠️ {a}</div>
+      ))}
 
       {/* Dados do dia */}
       <div className="card">
@@ -295,7 +306,8 @@ export default function SonoPage() {
         </div>
         <div className="field-row">
           <div className="field-label">Acordou<small>hora em que acordou de manhã</small></div>
-          <input type="time" value={acordou} onChange={e => setAcordouAndSave(e.target.value)} style={{ width:'auto', minWidth:110 }} />
+          <input type="time" value={acordou} onChange={e => setAcordouAndSave(e.target.value)}
+            style={{ width:'auto', minWidth:110 }} />
         </div>
         <div className="field-row">
           <div className="field-label">Plano</div>
@@ -342,9 +354,11 @@ export default function SonoPage() {
             )}
 
             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-              <input type="time" value={ini} onChange={e => setRTAndSave(`s${n}_ini`, e.target.value)} style={{ flex:1, textAlign:'center', fontSize:15 }} placeholder="início" />
+              <input type="time" value={ini} onChange={e => setRTAndSave(`s${n}_ini`, e.target.value)}
+                style={{ flex:1, textAlign:'center', fontSize:15 }} placeholder="início" />
               <span style={{ color:'var(--muted)', fontSize:13 }}>→</span>
-              <input type="time" value={fim} onChange={e => setRTAndSave(`s${n}_fim`, e.target.value)} style={{ flex:1, textAlign:'center', fontSize:15 }} placeholder="fim" />
+              <input type="time" value={fim} onChange={e => setRTAndSave(`s${n}_fim`, e.target.value)}
+                style={{ flex:1, textAlign:'center', fontSize:15 }} placeholder="fim" />
             </div>
 
             <div style={{ display:'flex', gap:6, marginTop:8 }}>
