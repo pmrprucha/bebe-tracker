@@ -18,282 +18,82 @@
     --danger: #e07070;
     --blush: #e8906a;
   }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { width:100%; height:100%; background:var(--bg); color:var(--text); font-family:'Instrument Sans',sans-serif; overflow:hidden; transition:background 2s; }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  .bg-glow { position:fixed; inset:0; pointer-events:none; transition:background 3s; z-index:0; }
+  body.state-ok       .bg-glow { background:radial-gradient(ellipse at 30% 50%,rgba(109,184,138,.08) 0%,transparent 60%),radial-gradient(ellipse at 70% 50%,rgba(106,174,200,.05) 0%,transparent 50%); }
+  body.state-sleeping .bg-glow { background:radial-gradient(ellipse at 50% 40%,rgba(106,174,200,.12) 0%,transparent 60%); }
+  body.state-warn     .bg-glow { background:radial-gradient(ellipse at 50% 30%,rgba(232,184,75,.1) 0%,transparent 55%); }
+  body.state-alert    .bg-glow { background:radial-gradient(ellipse at 50% 30%,rgba(224,112,112,.12) 0%,transparent 55%); }
 
-  html, body {
-    width: 100%; height: 100%;
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Instrument Sans', sans-serif;
-    overflow: hidden;
-    /* subtle grain */
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
-  }
+  .dashboard { width:100vw; height:100vh; display:grid; grid-template-columns:1fr 1.4fr 1fr; grid-template-rows:1fr 1fr; gap:20px; padding:32px; position:relative; z-index:1; }
 
-  /* Background glow blobs */
-  body::before {
-    content: '';
-    position: fixed;
-    top: -20%;
-    left: -10%;
-    width: 60%;
-    height: 80%;
-    background: radial-gradient(ellipse, rgba(109,184,138,0.06) 0%, transparent 60%);
-    pointer-events: none;
-  }
-  body::after {
-    content: '';
-    position: fixed;
-    bottom: -20%;
-    right: -10%;
-    width: 55%;
-    height: 70%;
-    background: radial-gradient(ellipse, rgba(106,174,200,0.06) 0%, transparent 60%);
-    pointer-events: none;
-  }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:24px; padding:32px 36px; display:flex; flex-direction:column; justify-content:space-between; position:relative; overflow:hidden; backdrop-filter:blur(20px); transition:background 2s,border-color 2s,box-shadow 2s; }
+  .card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent); }
 
-  .dashboard {
-    width: 100vw;
-    height: 100vh;
-    display: grid;
-    grid-template-columns: 1fr 1.4fr 1fr;
-    grid-template-rows: 1fr 1fr;
-    gap: 20px;
-    padding: 32px;
-    position: relative;
-    z-index: 1;
-  }
+  .card-label { font-size:clamp(13px,1vw,18px); font-weight:600; text-transform:uppercase; letter-spacing:1.5px; color:var(--muted); display:flex; align-items:center; gap:8px; }
+  .card-label .dot { width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.6; }
+  .card-value { font-family:'Fraunces',serif; font-weight:200; line-height:1; color:var(--text); }
+  .card-sub { font-size:clamp(11px,.85vw,15px); color:var(--muted); margin-top:6px; font-weight:500; }
 
-  /* ── CARDS ── */
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 24px;
-    padding: 32px 36px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    position: relative;
-    overflow: hidden;
-    backdrop-filter: blur(20px);
-    transition: border-color 0.5s;
-  }
+  /* HORA */
+  #card-hora { grid-row:1/3; align-items:center; text-align:center; }
+  #card-hora .card-value { font-size:clamp(80px,8.5vw,150px); letter-spacing:-4px; color:#fff; }
+  #card-hora .card-date  { font-family:'Fraunces',serif; font-size:clamp(16px,1.4vw,24px); font-style:italic; color:rgba(255,255,255,.35); margin-top:10px; }
+  #card-hora .card-label { justify-content:center; }
 
-  .card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
-  }
+  /* ESTADO */
+  #card-estado { grid-column:2; grid-row:1; }
+  .estado-icon  { font-size:clamp(36px,3.5vw,64px); line-height:1; }
+  .estado-text  { font-family:'Fraunces',serif; font-size:clamp(26px,2.8vw,50px); font-weight:300; }
+  .estado-timer { font-family:'Fraunces',serif; font-size:clamp(44px,4.8vw,84px); font-weight:200; letter-spacing:-2px; line-height:1; }
 
-  .card-label {
-    font-size: clamp(14px, 1.1vw, 20px);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: var(--muted);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+  /* ÚLTIMA ALIMENTAÇÃO */
+  #card-ref { grid-column:3; grid-row:1; transition:background 2s,border-color 2s; }
 
-  .card-label .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-    opacity: 0.6;
-  }
+  /* PRÓXIMA SESTA */
+  #card-next { grid-column:2; grid-row:2; }
 
-  .card-value {
-    font-family: 'Fraunces', serif;
-    font-weight: 200;
-    line-height: 1;
-    color: var(--text);
-  }
+  /* DEITAR */
+  #card-deitar { grid-column:3; grid-row:2; }
 
-  .card-sub {
-    font-size: clamp(12px, 0.9vw, 16px);
-    color: var(--muted);
-    margin-top: 6px;
-    font-weight: 500;
-  }
+  @keyframes sleepPulse { 0%,100%{opacity:.12;transform:scale(1)} 50%{opacity:.22;transform:scale(1.04)} }
+  .sleep-glow { position:absolute; inset:0; border-radius:24px; background:radial-gradient(ellipse at 50% 50%,rgba(106,174,200,.2),transparent 70%); animation:sleepPulse 4s ease-in-out infinite; pointer-events:none; }
+  @keyframes alertPulse { 0%,100%{opacity:.1} 50%{opacity:.2} }
+  .alert-glow { position:absolute; inset:0; border-radius:24px; background:radial-gradient(ellipse at 50% 30%,rgba(224,112,112,.25),transparent 60%); animation:alertPulse 2s ease-in-out infinite; pointer-events:none; }
 
-  /* ── HORA (span 1 col, full height left) ── */
-  #card-hora {
-    grid-row: 1 / 3;
-    align-items: center;
-    text-align: center;
-    background: rgba(109,184,138,0.05);
-    border-color: rgba(109,184,138,0.15);
-  }
+  .progress-track { width:100%; height:4px; background:rgba(255,255,255,.06); border-radius:2px; overflow:hidden; margin-top:12px; }
+  .progress-fill  { height:100%; border-radius:2px; transition:width 1s linear; }
 
-  #card-hora .card-value {
-    font-size: clamp(80px, 9vw, 160px);
-    letter-spacing: -4px;
-    color: #fff;
-  }
+  .val-xl { font-size:clamp(48px,5vw,90px); }
+  .val-lg  { font-size:clamp(32px,3.2vw,58px); }
 
-  #card-hora .card-date {
-    font-family: 'Fraunces', serif;
-    font-size: clamp(18px, 1.6vw, 28px);
-    font-style: italic;
-    color: rgba(255,255,255,0.4);
-    margin-top: 8px;
-  }
+  .c-sage   { color:var(--sage); }
+  .c-sky    { color:var(--sky); }
+  .c-warn   { color:var(--warn); }
+  .c-danger { color:var(--danger); }
+  .c-blush  { color:var(--blush); }
 
-  #card-hora .card-label { justify-content: center; }
+  .name-badge { position:fixed; top:18px; left:50%; transform:translateX(-50%); font-family:'Fraunces',serif; font-style:italic; font-size:clamp(13px,1.1vw,18px); color:rgba(255,255,255,.18); font-weight:300; letter-spacing:3px; z-index:10; pointer-events:none; }
 
-  /* ── ESTADO (span 1 col centre, row 1) ── */
-  #card-estado {
-    grid-column: 2;
-    grid-row: 1;
-  }
+  .sync-dot { position:fixed; bottom:18px; right:24px; display:flex; align-items:center; gap:7px; font-size:11px; color:rgba(255,255,255,.18); font-weight:500; z-index:10; }
+  .sync-dot::before { content:''; width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,.2); display:block; }
+  .sync-dot.ok::before      { background:var(--sage); }
+  .sync-dot.err::before     { background:var(--danger); }
+  .sync-dot.syncing::before { background:var(--warn); animation:blink 1s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-  #card-estado.sleeping {
-    background: rgba(106,174,200,0.07);
-    border-color: rgba(106,174,200,0.2);
-  }
-
-  #card-estado.awake {
-    background: rgba(232,184,75,0.05);
-    border-color: rgba(232,184,75,0.15);
-  }
-
-  .estado-icon {
-    font-size: clamp(40px, 4vw, 72px);
-    line-height: 1;
-  }
-
-  .estado-text {
-    font-family: 'Fraunces', serif;
-    font-size: clamp(28px, 3vw, 52px);
-    font-weight: 300;
-    color: var(--text);
-  }
-
-  .estado-timer {
-    font-family: 'Fraunces', serif;
-    font-size: clamp(48px, 5vw, 88px);
-    font-weight: 200;
-    letter-spacing: -2px;
-    line-height: 1;
-  }
-
-  /* ── PRÓXIMA SESTA / DEITAR (centre row 2) ── */
-  #card-next {
-    grid-column: 2;
-    grid-row: 2;
-  }
-
-  /* ── ÚLTIMA REFEIÇÃO (top right) ── */
-  #card-refeicao {
-    grid-column: 3;
-    grid-row: 1;
-  }
-
-  /* ── DEITAR (bottom right) ── */
-  #card-deitar {
-    grid-column: 3;
-    grid-row: 2;
-    background: rgba(109,184,138,0.05);
-    border-color: rgba(109,184,138,0.12);
-  }
-
-  /* Pulse animation for sleeping */
-  @keyframes sleepPulse {
-    0%, 100% { opacity: 0.15; transform: scale(1); }
-    50%       { opacity: 0.25; transform: scale(1.05); }
-  }
-
-  .sleep-glow {
-    position: absolute;
-    inset: 0;
-    border-radius: 24px;
-    background: radial-gradient(ellipse at 50% 50%, rgba(106,174,200,0.15), transparent 70%);
-    animation: sleepPulse 4s ease-in-out infinite;
-    pointer-events: none;
-  }
-
-  /* Sync dot */
-  .sync-dot {
-    position: fixed;
-    bottom: 20px;
-    right: 28px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: rgba(255,255,255,0.2);
-    font-weight: 500;
-  }
-
-  .sync-dot::before {
-    content: '';
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.2);
-    display: block;
-  }
-
-  .sync-dot.ok::before { background: var(--sage); }
-  .sync-dot.err::before { background: var(--danger); }
-  .sync-dot.syncing::before { background: var(--warn); animation: blink 1s infinite; }
-
-  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-
-  /* Value sizes */
-  .val-xl  { font-size: clamp(52px, 5.5vw, 96px); }
-  .val-lg  { font-size: clamp(36px, 3.5vw, 64px); }
-  .val-md  { font-size: clamp(24px, 2.2vw, 40px); }
-
-  .accent-sage   { color: var(--sage); }
-  .accent-sky    { color: var(--sky); }
-  .accent-warn   { color: var(--warn); }
-  .accent-danger { color: var(--danger); }
-  .accent-blush  { color: var(--blush); }
-
-  /* Progress bar */
-  .progress-track {
-    width: 100%;
-    height: 4px;
-    background: rgba(255,255,255,0.06);
-    border-radius: 2px;
-    overflow: hidden;
-    margin-top: 12px;
-  }
-  .progress-fill {
-    height: 100%;
-    border-radius: 2px;
-    transition: width 1s linear;
-  }
-
-  /* Name badge top */
-  .name-badge {
-    position: fixed;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-family: 'Fraunces', serif;
-    font-style: italic;
-    font-size: clamp(14px, 1.2vw, 20px);
-    color: rgba(255,255,255,0.2);
-    font-weight: 300;
-    letter-spacing: 2px;
-    z-index: 10;
-  }
+  .ref-tipo   { font-size:clamp(12px,.9vw,16px); font-weight:600; letter-spacing:.5px; margin-top:6px; }
+  .ref-detalhe{ font-size:clamp(11px,.8vw,14px); color:var(--muted); margin-top:6px; line-height:1.4; max-height:3em; overflow:hidden; }
 </style>
 </head>
-<body>
-
-<div class="name-badge" id="nameBadge">🌿 martim</div>
+<body class="state-ok">
+<div class="bg-glow"></div>
+<div class="name-badge">🌿 martim</div>
 
 <div class="dashboard">
 
-  <!-- HORA -->
   <div class="card" id="card-hora">
     <div class="card-label"><div class="dot"></div>Hora</div>
     <div>
@@ -303,49 +103,46 @@
     <div style="height:1px"></div>
   </div>
 
-  <!-- ESTADO -->
   <div class="card" id="card-estado">
     <div class="card-label" id="estadoLabel"><div class="dot"></div>Estado</div>
-    <div style="display:flex; align-items:center; gap:20px;">
+    <div style="display:flex;align-items:center;gap:20px;">
       <div class="estado-icon" id="estadoIcon">⏳</div>
       <div>
         <div class="estado-text" id="estadoText">A carregar…</div>
-        <div class="estado-timer accent-sky" id="estadoTimer" style="display:none"></div>
+        <div class="estado-timer" id="estadoTimer" style="display:none"></div>
       </div>
     </div>
     <div>
       <div class="card-sub" id="estadoSub"></div>
-      <div class="progress-track" id="estadoProgressTrack" style="display:none">
-        <div class="progress-fill" id="estadoProgressFill" style="width:0%"></div>
+      <div class="progress-track" id="progressTrack" style="display:none">
+        <div class="progress-fill" id="progressFill"></div>
       </div>
     </div>
   </div>
 
-  <!-- ÚLTIMA REFEIÇÃO -->
-  <div class="card" id="card-refeicao">
-    <div class="card-label"><div class="dot"></div>Última refeição</div>
+  <div class="card" id="card-ref">
+    <div class="card-label"><div class="dot"></div>Última alimentação</div>
     <div>
       <div class="card-value val-xl" id="refSince">–</div>
-      <div class="card-sub" id="refDetail"></div>
+      <div class="ref-tipo" id="refTipo"></div>
+      <div class="ref-detalhe" id="refDetalhe"></div>
     </div>
     <div class="card-sub" id="refHora"></div>
   </div>
 
-  <!-- PRÓXIMA SESTA -->
   <div class="card" id="card-next">
     <div class="card-label" id="nextLabel"><div class="dot"></div>Próxima sesta</div>
     <div>
-      <div class="card-value val-xl accent-sky" id="nextTime">–</div>
+      <div class="card-value val-xl c-sky" id="nextTime">–</div>
       <div class="card-sub" id="nextSub"></div>
     </div>
     <div class="card-sub" id="nextDetail"></div>
   </div>
 
-  <!-- DEITAR -->
   <div class="card" id="card-deitar">
     <div class="card-label"><div class="dot"></div>Hora de deitar</div>
     <div>
-      <div class="card-value val-xl accent-sage" id="deitarTime">–</div>
+      <div class="card-value val-xl c-sage" id="deitarTime">–</div>
       <div class="card-sub" id="deitarSub"></div>
     </div>
     <div class="card-sub" id="deitarDetail"></div>
@@ -356,395 +153,300 @@
 <div class="sync-dot" id="syncDot">sincronizado</div>
 
 <script>
-// ═══════════════════════════════════════════════
-// CONFIG — preenche com os teus dados do Supabase
-// ═══════════════════════════════════════════════
-const SUPABASE_URL     = 'https://wkceuiexgauziaqyssag.supabase.co'
+// ═══ CONFIG ════════════════════════════════════
+const SUPABASE_URL      = 'https://wkceuiexgauziaqyssag.supabase.co'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndrY2V1aWV4Z2F1emlhcXlzc2FnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3MzAxMjMsImV4cCI6MjA5MDMwNjEyM30.VO5m57Zlzml4V05M5Sdh3D6WP1Eve1-o55bPOCOIl-g'
-const CHILD_ID         = 'c2c0847c-6629-4160-bcb6-89b87adfe7c6' // ver instruções abaixo
-
+const CHILD_ID          = 'c2c0847c-6629-4160-bcb6-89b87adfe7c6'
 // ═══════════════════════════════════════════════
-// SUPABASE CLIENT (sem biblioteca, fetch directo)
-// ═══════════════════════════════════════════════
-const headers = {
-  'apikey': SUPABASE_ANON_KEY,
-  'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
-  'Content-Type': 'application/json'
-}
 
-async function query(table, params = '') {
+const H = { 'apikey':SUPABASE_ANON_KEY, 'Authorization':'Bearer '+SUPABASE_ANON_KEY }
+
+async function q(table,params='') {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, { headers })
-    if (!res.ok) return null
-    return await res.json()
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`,{headers:H})
+    if(!r.ok) return null
+    return await r.json()
   } catch { return null }
 }
 
-// ═══════════════════════════════════════════════
-// UTILS
-// ═══════════════════════════════════════════════
-function toMins(t) {
-  if (!t) return null
-  const [h, m] = t.split(':').map(Number)
-  return h * 60 + m
+function toMins(t){if(!t)return null;const[h,m]=t.split(':').map(Number);return h*60+m}
+function fromMins(m){if(m==null)return'–';m=((m%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')}
+function today(){return new Date().toISOString().slice(0,10)}
+function fmtElapsed(s){if(s<60)return s+'s';const m=Math.floor(s/60),h=Math.floor(m/60);return h===0?m+'min':h+'h'+(m%60>0?' '+(m%60)+'min':'')}
+function fmtTimer(s){const m=Math.floor(s/60),h=Math.floor(m/60),mm=String(m%60).padStart(2,'0'),ss=String(s%60).padStart(2,'0');return h===0?m+':'+ss:h+':'+mm+':'+ss}
+function horaToMs(hora){if(!hora)return null;const[h,m]=hora.split(':').map(Number);const d=new Date();d.setHours(h,m,0,0);return d.getTime()}
+
+function updateClock(){
+  const n=new Date()
+  document.getElementById('clockTime').textContent=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')
+  const days=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado']
+  const months=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
+  document.getElementById('clockDate').textContent=days[n.getDay()]+', '+n.getDate()+' '+months[n.getMonth()]
 }
 
-function fromMins(m) {
-  if (m == null) return '–'
-  m = ((m % 1440) + 1440) % 1440
-  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
+const LADO_PT = {E:'Esquerdo',D:'Direito',A:'Ambos',M:'Mamadeira'}
+
+let S = {
+  sleeping:false, sleepingNight:false, sleepStart:null,
+  acordou:null, dormiu:null, deitar:null, deitarMin:null, deitarMax:null,
+  nextSesta:null, nextSestaNum:0,
+  // última alimentação (amamentação ou refeição, o mais recente)
+  lastMs:null, lastTipo:'', lastDetalhe:'', lastHora:''
 }
 
-function today() {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function fmtElapsed(secs) {
-  if (secs < 0) return '0min'
-  const m = Math.floor(secs / 60)
-  const h = Math.floor(m / 60)
-  if (h === 0) return `${m}min`
-  return `${h}h ${m % 60 > 0 ? m % 60 + 'min' : ''}`
-}
-
-function fmtTimer(secs) {
-  const m = Math.floor(secs / 60)
-  const h = Math.floor(m / 60)
-  const mm = String(m % 60).padStart(2, '0')
-  if (h === 0) return `${m}:${String(secs % 60).padStart(2, '0')}`
-  return `${h}:${mm}:${String(secs % 60).padStart(2, '0')}`
-}
-
-function horaToMs(hora) {
-  if (!hora) return null
-  const [h, m] = hora.split(':').map(Number)
-  const d = new Date()
-  d.setHours(h, m, 0, 0)
-  return d.getTime()
-}
-
-// ═══════════════════════════════════════════════
-// RELÓGIO
-// ═══════════════════════════════════════════════
-function updateClock() {
-  const now = new Date()
-  const hh = String(now.getHours()).padStart(2, '0')
-  const mm = String(now.getMinutes()).padStart(2, '0')
-  document.getElementById('clockTime').textContent = hh + ':' + mm
-
-  const days = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
-  const months = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
-  document.getElementById('clockDate').textContent =
-    `${days[now.getDay()]}, ${now.getDate()} ${months[now.getMonth()]}`
-}
-
-// ═══════════════════════════════════════════════
-// ESTADO GLOBAL
-// ═══════════════════════════════════════════════
-let state = {
-  sleeping: false,
-  sleepStart: null,   // ms quando começou a sesta
-  acordou: null,      // HH:MM
-  lastFeedMs: null,   // ms da última refeição/amamentação
-  lastFeedType: '',
-  nextSesta: null,    // HH:MM alvo próxima sesta
-  nextSestaNum: 0,
-  deitar: null,       // HH:MM
-  deitarMin: null,
-  deitarMax: null,
-  child: null,
-}
-
-// ═══════════════════════════════════════════════
-// FETCH DATA
-// ═══════════════════════════════════════════════
-async function fetchData() {
+async function fetchData(){
   setSyncStatus('syncing')
-  const todayStr = today()
+  const td=today()
+  const [kids,sleep,feeds,meals]=await Promise.all([
+    q('children',`id=eq.${CHILD_ID}&select=*`),
+    q('sleep_events',`child_id=eq.${CHILD_ID}&data_date=eq.${td}&select=*`),
+    q('feeds',`child_id=eq.${CHILD_ID}&data_date=eq.${td}&select=*&order=created_at.desc&limit=5`),
+    q('meals',`child_id=eq.${CHILD_ID}&data_date=eq.${td}&select=*&order=hora.desc&limit=1`),
+  ])
 
-  // Criança
-  const kids = await query('children', `id=eq.${CHILD_ID}&select=*`)
-  if (kids?.length) state.child = kids[0]
-
-  // Sono de hoje
-  const sleep = await query('sleep_events',
-    `child_id=eq.${CHILD_ID}&data_date=eq.${todayStr}&select=*`)
-
-  // Feeds de hoje
-  const feeds = await query('feeds',
-    `child_id=eq.${CHILD_ID}&data_date=eq.${todayStr}&select=*&order=created_at.desc&limit=5`)
-
-  // Refeições de hoje
-  const meals = await query('meals',
-    `child_id=eq.${CHILD_ID}&data_date=eq.${todayStr}&select=*&order=hora.desc&limit=1`)
-
-  if (!sleep && !feeds) { setSyncStatus('err'); return }
+  if(!sleep){setSyncStatus('err');return}
   setSyncStatus('ok')
 
-  const payload = sleep?.[0]?.payload || {}
+  const child=kids?.[0]||{}
+  const p=sleep?.[0]?.payload||{}
 
-  // Determinar estado: a dormir?
-  state.sleeping = false
-  state.sleepStart = null
-  state.acordou = payload.acordou || null
-  state.deitar = payload.deitar || null
-  state.deitarMin = state.child?.deitar_min || null
-  state.deitarMax = state.child?.deitar_max || null
+  S.deitarMin=child.deitar_min||'19:30'
+  S.deitarMax=child.deitar_max||'20:00'
+  S.acordou=p.acordou||null
+  S.dormiu=p.dormiu||null
+  S.deitar=p.deitar||null
 
-  // Verificar se está numa sesta agora (ini sem fim)
-  for (const n of [1, 2, 3]) {
-    const ini = payload[`s${n}_ini`]
-    const fim = payload[`s${n}_fim`]
-    if (ini && !fim) {
-      state.sleeping = true
-      state.sleepStart = horaToMs(ini)
-      break
+  // Sono nocturno: dormiu preenchido E acordou vazio
+  S.sleepingNight = !!(S.dormiu && !S.acordou)
+
+  // Sesta em curso (só se não está em sono nocturno)
+  S.sleeping=false; S.sleepStart=null
+  if(!S.sleepingNight){
+    for(const n of[1,2,3]){
+      const ini=p[`s${n}_ini`],fim=p[`s${n}_fim`]
+      if(ini&&!fim){S.sleeping=true;S.sleepStart=horaToMs(ini);break}
     }
   }
 
-  // Próxima sesta (primeiro alvo sem hora real de início)
-  state.nextSesta = null
-  state.nextSestaNum = 0
-  const alvos = [payload.alvo1, payload.alvo2, payload.alvo3]
-  for (let i = 0; i < 3; i++) {
-    const ini = payload[`s${i+1}_ini`]
-    if (!ini && alvos[i] && alvos[i] !== '–') {
-      state.nextSesta = alvos[i]
-      state.nextSestaNum = i + 1
-      break
-    }
+  // Próxima sesta
+  S.nextSesta=null;S.nextSestaNum=0
+  const alvos=[p.alvo1,p.alvo2,p.alvo3]
+  for(let i=0;i<3;i++){
+    const ini=p[`s${i+1}_ini`]
+    if(!ini&&alvos[i]&&alvos[i]!=='–'){S.nextSesta=alvos[i];S.nextSestaNum=i+1;break}
   }
 
-  // Última alimentação (amamentação ou refeição, o mais recente)
-  let lastFeedMs = null
-  let lastFeedType = ''
-  let lastFeedHora = ''
+  // ── Última alimentação: amamentação OU refeição, o mais recente ──
+  let candidates = []
 
-  if (feeds?.length) {
-    const f = feeds[0]
-    const ms = f.created_at
-      ? new Date(f.created_at).getTime() + (f.duracao_seg || 0) * 1000
+  // Amamentação — terminou em created_at + duracao_seg
+  if(feeds?.length){
+    const f=feeds[0]
+    const endMs=f.created_at
+      ? new Date(f.created_at).getTime()+(f.duracao_seg||0)*1000
       : horaToMs(f.hora)
-    if (ms) { lastFeedMs = ms; lastFeedType = 'amamentação'; lastFeedHora = f.hora }
+    if(endMs) candidates.push({
+      ms: endMs,
+      tipo: 'Amamentação',
+      detalhe: f.lado?(LADO_PT[f.lado]||f.lado):'',
+      hora: f.hora
+    })
   }
 
-  if (meals?.length) {
-    const mealMs = horaToMs(meals[0].hora)
-    if (mealMs && (!lastFeedMs || mealMs > lastFeedMs)) {
-      lastFeedMs = mealMs
-      lastFeedType = 'refeição'
-      lastFeedHora = meals[0].hora
-    }
+  // Refeição — usar hora
+  if(meals?.length){
+    const m=meals[0]
+    const mealMs=horaToMs(m.hora)
+    if(mealMs) candidates.push({
+      ms: mealMs,
+      tipo: 'Refeição',
+      detalhe: m.obs||m.descricao||'',
+      hora: m.hora
+    })
   }
 
-  state.lastFeedMs = lastFeedMs
-  state.lastFeedType = lastFeedType
-  state.lastFeedHora = lastFeedHora
+  if(candidates.length){
+    // O mais recente
+    const best = candidates.reduce((a,b)=>a.ms>b.ms?a:b)
+    S.lastMs      = best.ms
+    S.lastTipo    = best.tipo
+    S.lastDetalhe = best.detalhe
+    S.lastHora    = best.hora
+  } else {
+    S.lastMs=null; S.lastTipo=''; S.lastDetalhe=''; S.lastHora=''
+  }
 }
 
-// ═══════════════════════════════════════════════
-// RENDER
-// ═══════════════════════════════════════════════
-function render() {
-  const now = Date.now()
-  const nowMins = new Date().getHours() * 60 + new Date().getMinutes()
+function getGlobalState(){
+  const now=Date.now()
+  if(S.sleeping||S.sleepingNight) return 'sleeping'
+  if(S.lastMs){
+    const s=Math.floor((now-S.lastMs)/1000)
+    if(s>10800) return 'alert'
+    if(s>7200)  return 'warn'
+  }
+  if(S.nextSesta){
+    const ms=horaToMs(S.nextSesta)
+    if(ms&&now>ms+45*60*1000) return 'alert'
+    if(ms&&now>ms+15*60*1000) return 'warn'
+  }
+  return 'ok'
+}
 
-  // ── ESTADO ────────────────────────────────────
-  const estadoCard = document.getElementById('card-estado')
-  const estadoIcon = document.getElementById('estadoIcon')
-  const estadoText = document.getElementById('estadoText')
-  const estadoTimer = document.getElementById('estadoTimer')
-  const estadoSub = document.getElementById('estadoSub')
-  const estadoLabel = document.getElementById('estadoLabel')
-  const progressTrack = document.getElementById('estadoProgressTrack')
-  const progressFill = document.getElementById('estadoProgressFill')
+function render(){
+  const now=Date.now()
+  const gs=getGlobalState()
+  document.body.className='state-'+gs
 
-  // Remove sleep glow se existir
-  const existingGlow = estadoCard.querySelector('.sleep-glow')
-  if (existingGlow) existingGlow.remove()
+  // ── ESTADO ──────────────────────────────────
+  const ec=document.getElementById('card-estado')
+  const ei=document.getElementById('estadoIcon')
+  const et=document.getElementById('estadoText')
+  const etr=document.getElementById('estadoTimer')
+  const es=document.getElementById('estadoSub')
+  const pt=document.getElementById('progressTrack')
+  const pf=document.getElementById('progressFill')
+  ec.querySelectorAll('.sleep-glow,.alert-glow').forEach(e=>e.remove())
 
-  if (state.sleeping && state.sleepStart) {
-    estadoCard.className = 'card sleeping'
-    const glow = document.createElement('div')
-    glow.className = 'sleep-glow'
-    estadoCard.appendChild(glow)
+  if(S.sleepingNight){
+    ec.style.background='rgba(20,30,50,.4)'; ec.style.borderColor='rgba(106,174,200,.2)'
+    const g=document.createElement('div');g.className='sleep-glow';ec.appendChild(g)
+    ei.textContent='🌙'; et.textContent='A dormir (noite)'; et.style.color='var(--sky)'
+    etr.style.display='block'; etr.className='estado-timer c-sky'
+    const refMs=horaToMs(S.dormiu)
+    etr.textContent=refMs?fmtTimer(Math.floor((now-refMs)/1000)):'–'
+    es.textContent=S.dormiu?'Desde as '+S.dormiu:''; pt.style.display='none'
 
-    estadoIcon.textContent = '😴'
-    estadoText.textContent = 'A dormir'
-    estadoText.style.color = 'var(--sky)'
-    estadoTimer.style.display = 'block'
-    estadoTimer.className = 'estado-timer accent-sky'
-    const sleepSecs = Math.floor((now - state.sleepStart) / 1000)
-    estadoTimer.textContent = fmtTimer(sleepSecs)
-    estadoLabel.querySelector('.dot').style.background = 'var(--sky)'
-    estadoSub.textContent = `Começou às ${new Date(state.sleepStart).getHours().toString().padStart(2,'0')}:${new Date(state.sleepStart).getMinutes().toString().padStart(2,'0')}`
-    progressTrack.style.display = 'none'
+  } else if(S.sleeping&&S.sleepStart){
+    ec.style.background='rgba(106,174,200,.07)'; ec.style.borderColor='rgba(106,174,200,.2)'
+    const g=document.createElement('div');g.className='sleep-glow';ec.appendChild(g)
+    ei.textContent='😴'; et.textContent='A dormir (sesta)'; et.style.color='var(--sky)'
+    etr.style.display='block'; etr.className='estado-timer c-sky'
+    etr.textContent=fmtTimer(Math.floor((now-S.sleepStart)/1000))
+    const sh=new Date(S.sleepStart)
+    es.textContent='Começou às '+String(sh.getHours()).padStart(2,'0')+':'+String(sh.getMinutes()).padStart(2,'0')
+    pt.style.display='none'
 
   } else {
-    estadoCard.className = 'card awake'
-    estadoIcon.textContent = '☀️'
-    estadoText.textContent = 'Acordado'
-    estadoText.style.color = 'var(--warn)'
-    estadoTimer.style.display = 'block'
-    estadoTimer.className = 'estado-timer accent-warn'
-    estadoLabel.querySelector('.dot').style.background = 'var(--warn)'
-
-    // Calcular tempo acordado desde último fim de sesta ou hora de acordar
-    const refMs = (() => {
-      // encontrar último fim de sesta — não temos directo, usar acordou por agora
-      return state.acordou ? horaToMs(state.acordou) : null
-    })()
-
-    if (refMs) {
-      const awakeSecs = Math.max(0, Math.floor((now - refMs) / 1000))
-      estadoTimer.textContent = fmtElapsed(awakeSecs)
-
-      // Progressbar até próxima sesta ou deitar
-      if (state.nextSesta) {
-        const nextMs = horaToMs(state.nextSesta)
-        if (nextMs) {
-          const total = nextMs - refMs
-          const done  = now - refMs
-          const pct   = Math.min(100, Math.max(0, (done / total) * 100))
-          progressTrack.style.display = 'block'
-          progressFill.style.width = pct + '%'
-          progressFill.style.background = pct > 80 ? 'var(--warn)' : 'var(--sage)'
-          estadoSub.textContent = `${Math.round(pct)}% do caminho até à ${state.nextSestaNum}ª sesta`
+    ec.style.background=gs==='alert'?'rgba(224,112,112,.06)':gs==='warn'?'rgba(232,184,75,.05)':'rgba(255,255,255,.03)'
+    ec.style.borderColor=gs==='alert'?'rgba(224,112,112,.25)':gs==='warn'?'rgba(232,184,75,.2)':'var(--border)'
+    if(gs==='alert'){const g=document.createElement('div');g.className='alert-glow';ec.appendChild(g)}
+    ei.textContent='☀️'; et.textContent='Acordado'
+    et.style.color=gs==='alert'?'var(--danger)':'var(--warn)'
+    const refMs=horaToMs(S.acordou)
+    if(refMs){
+      const secs=Math.max(0,Math.floor((now-refMs)/1000))
+      etr.style.display='block'; etr.textContent=fmtElapsed(secs)
+      etr.className='estado-timer '+(gs==='alert'?'c-danger':gs==='warn'?'c-warn':'c-warn')
+      if(S.nextSesta){
+        const nms=horaToMs(S.nextSesta)
+        if(nms){
+          const pct=Math.min(100,Math.max(0,(now-refMs)/(nms-refMs)*100))
+          pt.style.display='block'
+          pf.style.width=pct+'%'
+          pf.style.background=pct>90?'var(--danger)':pct>70?'var(--warn)':'var(--sage)'
+          es.textContent=now>nms?'🔔 Hora da sesta!':Math.round(pct)+'% até à '+S.nextSestaNum+'ª sesta'
         }
-      } else {
-        progressTrack.style.display = 'none'
-        estadoSub.textContent = state.acordou ? `Acordou às ${state.acordou}` : ''
-      }
+      } else { pt.style.display='none'; es.textContent=S.acordou?'Acordou às '+S.acordou:'' }
     } else {
-      estadoTimer.textContent = '–'
-      estadoSub.textContent = 'Regista a hora de acordar na app'
-      progressTrack.style.display = 'none'
+      etr.style.display='none'; es.textContent='Regista a hora de acordar na app'; pt.style.display='none'
     }
   }
 
-  // ── ÚLTIMA REFEIÇÃO ────────────────────────────
-  const refSince = document.getElementById('refSince')
-  const refDetail = document.getElementById('refDetail')
-  const refHora = document.getElementById('refHora')
+  // ── ÚLTIMA ALIMENTAÇÃO ─────────────────────────
+  const rc  = document.getElementById('card-ref')
+  const rs  = document.getElementById('refSince')
+  const rt  = document.getElementById('refTipo')
+  const rd  = document.getElementById('refDetalhe')
+  const rh  = document.getElementById('refHora')
 
-  if (state.lastFeedMs) {
-    const secs = Math.floor((now - state.lastFeedMs) / 1000)
-    const elapsed = fmtElapsed(secs)
-    refSince.textContent = elapsed
-    // Cor baseada no tempo
-    if (secs < 7200)       { refSince.className = 'card-value val-xl accent-sage' }
-    else if (secs < 10800) { refSince.className = 'card-value val-xl accent-warn' }
-    else                   { refSince.className = 'card-value val-xl accent-danger' }
-    refDetail.textContent = `Última ${state.lastFeedType}`
-    refHora.textContent = state.lastFeedHora ? `às ${state.lastFeedHora}` : ''
+  if(S.lastMs){
+    const secs=Math.floor((now-S.lastMs)/1000)
+    rs.textContent=fmtElapsed(secs)
+    if(secs>10800){
+      rs.className='card-value val-xl c-danger'
+      rc.style.background='rgba(224,112,112,.07)'; rc.style.borderColor='rgba(224,112,112,.25)'
+    } else if(secs>7200){
+      rs.className='card-value val-xl c-warn'
+      rc.style.background='rgba(232,184,75,.06)'; rc.style.borderColor='rgba(232,184,75,.2)'
+    } else {
+      rs.className='card-value val-xl c-sage'
+      rc.style.background='rgba(109,184,138,.06)'; rc.style.borderColor='rgba(109,184,138,.15)'
+    }
+    rt.textContent=S.lastTipo
+    rt.style.color=secs>10800?'var(--danger)':secs>7200?'var(--warn)':'var(--sage)'
+    rd.textContent=S.lastDetalhe||''
+    rh.textContent=S.lastHora?'às '+S.lastHora:''
   } else {
-    refSince.textContent = '–'
-    refSince.className = 'card-value val-xl'
-    refDetail.textContent = 'Sem registos hoje'
-    refHora.textContent = ''
+    rs.textContent='–'; rs.className='card-value val-xl'
+    rt.textContent=''; rd.textContent='Sem registos hoje'; rh.textContent=''
+    rc.style.background=''; rc.style.borderColor=''
   }
 
   // ── PRÓXIMA SESTA ──────────────────────────────
-  const nextLabel = document.getElementById('nextLabel')
-  const nextTime  = document.getElementById('nextTime')
-  const nextSub   = document.getElementById('nextSub')
-  const nextDetail = document.getElementById('nextDetail')
+  const nl=document.getElementById('nextLabel')
+  const nt=document.getElementById('nextTime')
+  const ns=document.getElementById('nextSub')
+  const nd=document.getElementById('nextDetail')
 
-  if (state.sleeping) {
-    nextLabel.innerHTML = '<div class="dot" style="background:var(--sky)"></div>Sesta atual'
-    nextTime.textContent = '😴'
-    nextTime.className = 'card-value val-xl accent-sky'
-    const durMins = state.sleepStart ? Math.floor((now - state.sleepStart) / 60000) : 0
-    nextSub.textContent = `${durMins} minutos`
-    nextDetail.textContent = ''
-  } else if (state.nextSesta) {
-    nextLabel.innerHTML = `<div class="dot" style="background:var(--sky)"></div>${state.nextSestaNum}ª Sesta`
-    nextTime.textContent = state.nextSesta
-    nextTime.className = 'card-value val-xl accent-sky'
-    // Quanto falta
-    const nextMs = horaToMs(state.nextSesta)
-    if (nextMs) {
-      const diffMins = Math.round((nextMs - now) / 60000)
-      if (diffMins > 0) {
-        nextSub.textContent = `em ${fmtElapsed(diffMins * 60)}`
-        nextDetail.textContent = ''
-      } else if (diffMins > -30) {
-        nextSub.textContent = '🔔 É hora da sesta!'
-        nextSub.style.color = 'var(--warn)'
-        nextDetail.textContent = ''
-      } else {
-        nextSub.textContent = 'sesta atrasada'
-        nextSub.style.color = 'var(--danger)'
-      }
+  if(S.sleeping){
+    nl.innerHTML='<div class="dot" style="background:var(--sky)"></div>Sesta atual'
+    nt.textContent='😴'; nt.className='card-value val-xl c-sky'
+    const dur=S.sleepStart?Math.floor((now-S.sleepStart)/60000):0
+    ns.textContent=dur+'min'; nd.textContent=''
+  } else if(S.nextSesta){
+    nl.innerHTML=`<div class="dot" style="background:var(--sky)"></div>${S.nextSestaNum}ª Sesta`
+    nt.textContent=S.nextSesta
+    const nms=horaToMs(S.nextSesta)
+    if(nms){
+      const diff=Math.round((nms-now)/60000)
+      if(diff>0){nt.className='card-value val-xl c-sky';ns.textContent='em '+fmtElapsed(diff*60);ns.style.color='var(--muted)'}
+      else{nt.className='card-value val-xl c-warn';ns.textContent='🔔 É hora da sesta!';ns.style.color='var(--warn)'}
     }
+    nd.textContent=''
   } else {
-    nextLabel.innerHTML = '<div class="dot"></div>Próxima sesta'
-    nextTime.textContent = '–'
-    nextTime.className = 'card-value val-xl'
-    nextSub.textContent = 'sem mais sestas previstas'
-    nextDetail.textContent = ''
+    nl.innerHTML='<div class="dot"></div>Próxima sesta'
+    nt.textContent='–'; nt.className='card-value val-xl'
+    ns.textContent='sem mais sestas previstas'; nd.textContent=''
   }
 
   // ── DEITAR ─────────────────────────────────────
-  const deitarTime   = document.getElementById('deitarTime')
-  const deitarSub    = document.getElementById('deitarSub')
-  const deitarDetail = document.getElementById('deitarDetail')
+  const dt=document.getElementById('deitarTime')
+  const ds=document.getElementById('deitarSub')
+  const dd=document.getElementById('deitarDetail')
+  const dMin=S.deitarMin||'19:30', dMax=S.deitarMax||'20:00'
+  dd.textContent='janela: '+dMin+' – '+dMax
 
-  const deitarMin = state.deitarMin || '19:30'
-  const deitarMax = state.deitarMax || '20:00'
-  const janela = `${deitarMin} – ${deitarMax}`
-
-  if (state.deitar) {
-    deitarTime.textContent = state.deitar
-    const deitarMs = horaToMs(state.deitar)
-    if (deitarMs) {
-      const diffMins = Math.round((deitarMs - now) / 60000)
-      if (diffMins > 60) {
-        deitarSub.textContent = `em ${fmtElapsed(diffMins * 60)}`
-        deitarTime.className = 'card-value val-xl accent-sage'
-      } else if (diffMins > 0) {
-        deitarSub.textContent = `⚡ em ${diffMins}min!`
-        deitarTime.className = 'card-value val-xl accent-warn'
-      } else {
-        deitarSub.textContent = '🌙 hora de dormir!'
-        deitarTime.className = 'card-value val-xl accent-blush'
-      }
+  if(S.deitar){
+    dt.textContent=S.deitar
+    const dms=horaToMs(S.deitar)
+    if(dms){
+      const diff=Math.round((dms-now)/60000)
+      if(diff>60){dt.className='card-value val-xl c-sage';ds.textContent='em '+fmtElapsed(diff*60);ds.style.color='var(--muted)'}
+      else if(diff>0){dt.className='card-value val-xl c-warn';ds.textContent='⚡ em '+diff+'min!';ds.style.color='var(--warn)'}
+      else{dt.className='card-value val-xl c-blush';ds.textContent='🌙 hora de dormir!';ds.style.color='var(--blush)'}
     }
   } else {
-    deitarTime.textContent = janela
-    deitarTime.style.fontSize = 'clamp(28px, 2.8vw, 48px)'
-    deitarSub.textContent = 'janela alvo'
-    deitarTime.className = 'card-value accent-sage'
+    dt.textContent=dMin+'–'+dMax
+    dt.style.fontSize='clamp(22px,2.3vw,38px)'
+    dt.className='card-value c-sage'
+    ds.textContent='janela alvo'; ds.style.color='var(--muted)'
   }
-  deitarDetail.textContent = `janela: ${janela}`
 }
 
-// ═══════════════════════════════════════════════
-// SYNC STATUS
-// ═══════════════════════════════════════════════
-function setSyncStatus(s) {
-  const el = document.getElementById('syncDot')
-  el.className = 'sync-dot ' + s
-  el.textContent = s === 'ok' ? 'sincronizado' : s === 'err' ? 'erro de ligação' : 'a sincronizar…'
+function setSyncStatus(s){
+  const el=document.getElementById('syncDot')
+  el.className='sync-dot '+s
+  el.textContent=s==='ok'?'sincronizado':s==='err'?'erro de ligação':'a sincronizar…'
 }
 
-// ═══════════════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════════════
-async function init() {
+async function init(){
   updateClock()
-  setInterval(updateClock, 1000)
-  setInterval(render, 1000)
-
-  // Fetch a cada 20s
-  await fetchData()
-  render()
-  setInterval(async () => {
-    await fetchData()
-    render()
-  }, 20000)
+  setInterval(updateClock,1000)
+  setInterval(render,1000)
+  await fetchData(); render()
+  setInterval(async()=>{await fetchData();render()},20000)
 }
-
 init()
 </script>
 </body>
