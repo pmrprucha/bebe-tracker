@@ -31,7 +31,7 @@ export function getSleepQuality(realMins, expectedMins) {
   const pct = (realMins - expectedMins) / expectedMins
   if (pct >= 0.25)  return { label:'Sesta longa! 🌟',     color:'#5a9e6e', bg:'rgba(90,158,110,0.1)',  short:false }
   if (pct >= -0.1)  return { label:'Boa sesta ✓',         color:'#7a9e7e', bg:'rgba(122,158,126,0.1)', short:false }
-  if (pct >= -0.3)  return { label:'Sesta curta',          color:'#c4a240', bg:'rgba(196,162,64,0.1)',  short:true  }
+  if (pct >= -0.3)  return { label:'Sesta curta',         color:'#c4a240', bg:'rgba(196,162,64,0.1)',  short:true  }
   return                    { label:'Sesta muito curta ⚠️', color:'#c06050', bg:'rgba(192,96,80,0.1)',  short:true  }
 }
 
@@ -74,8 +74,7 @@ export function calcSestas(acordouMins, plano, realTimes) {
   } else if (numSestas === 1) {
     result.deitar = s1Fim + (p.wN||240)
   } else {
-    // 0 sestas (2+ anos) — deitar baseado apenas no tempo acordado
-    result.deitar = acordouMins + (p.wN||720) // ~12h depois de acordar
+    result.deitar = acordouMins + (p.wN||720)
   }
 
   return result
@@ -88,5 +87,33 @@ export const formatDur = m => { if (!m) return '–'; const h=Math.floor(m/60), 
 export const getWeeks  = b => Math.floor((new Date()-new Date(b))/(7*24*3600*1000))
 export const getAgeLabel = b => { const d=Math.floor((new Date()-new Date(b))/(24*3600*1000)); const m=Math.floor(d/30.44); if(m<2) return Math.floor(d/7)+' sem'; if(m<24) return m+' m'; return Math.floor(m/12)+' anos' }
 export const today    = () => new Date().toISOString().slice(0,10)
+export const yesterday = () => new Date(Date.now() - 24*3600*1000).toISOString().slice(0,10)
 export const nowHHMM  = () => { const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0') }
 export const fmtSecs  = s => String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')
+
+export function makeLocalDateTimeString(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return ''
+  return `${dateStr}T${timeStr}:00`
+}
+
+export function diffMinutesBetween(startStr, endStr) {
+  if (!startStr || !endStr) return null
+  const start = new Date(startStr)
+  const end = new Date(endStr)
+  const ms = end.getTime() - start.getTime()
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || ms <= 0) return null
+  return Math.round(ms / 60000)
+}
+
+export function extractHHMM(dateTimeStr) {
+  if (!dateTimeStr || typeof dateTimeStr !== 'string') return ''
+  return dateTimeStr.slice(11, 16)
+}
+
+export function formatMinutesAsHM(mins) {
+  if (mins == null) return '–'
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  if (h === 0) return `${m}min`
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, '0')}`
+}
