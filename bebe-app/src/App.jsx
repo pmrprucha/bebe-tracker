@@ -121,12 +121,15 @@ function AppShell() {
 
       {/* Bottom nav */}
       <nav className="bottom-nav">
-        {NAV.map(n => (
-          <button key={n.key} className={`nav-item ${page===n.key?'active':''}`} onClick={() => setPage(n.key)}>
-            <span className="nav-icon">{n.icon}</span>
-            {n.label}
-          </button>
-        ))}
+     {NAV.map(n => {
+          const isActive = page === n.key
+          return (
+            <button key={n.key} className={`nav-item ${isActive ? 'active' : 'inactive'}`} onClick={() => setPage(n.key)}>
+              <span className="nav-icon">{n.icon}</span>
+              {n.label}
+            </button>
+          )
+        })}
       </nav>
 
       {toast && <div className="toast-container"><div className="toast">{toast}</div></div>}
