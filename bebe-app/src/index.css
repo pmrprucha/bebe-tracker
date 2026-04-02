@@ -173,7 +173,15 @@ textarea { resize: none; min-height: 72px; }
   transition: color 0.15s;
 }
 
-.nav-item .nav-icon { font-size: 20px; }
+.nav-item .nav-icon {
+  font-size: 20px;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+
+.nav-item.inactive .nav-icon {
+  filter: blur(1.7px);
+  opacity: 0.45;
+}
 .nav-item.active { color: var(--earth); }
 
 /* Badges */
