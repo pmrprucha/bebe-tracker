@@ -33,7 +33,7 @@ export default function HistoricoPage() {
         ? sb.from('sleep_events').select('*, profiles(name)').eq('child_id', activeChild.id).order('data_date', { ascending: false }).range(from, to)
         : { data: [] },
       (filter === 'all' || filter === 'mamadas')
-        ? sb.from('feeds').select('*, profiles(name)').eq('child_id', activeChild.id).order('data_date', { ascending: false }).order('created_at', { ascending: true })
+                ? sb.from('feeds').select('*, profiles(name)').eq('child_id', activeChild.id).order('data_date', { ascending: false }).order('hora', { ascending: false }).order('created_at', { ascending: false })
         : { data: [] },
       (filter === 'all' || filter === 'refeicoes')
         ? sb.from('meals').select('*, profiles(name)').eq('child_id', activeChild.id).order('data_date', { ascending: false })
