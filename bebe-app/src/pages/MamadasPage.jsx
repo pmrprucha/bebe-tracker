@@ -16,15 +16,22 @@ export default function MamadasPage() {
   const timerRef = useRef(null)
 
   useEffect(() => { if (activeChild) loadFeeds() }, [activeChild])
+const feedToTimestampMs = (feed) => {
+    if (feed?.created_at) return new Date(feed.created_at).getTime()
+    if (feed?.data_date && feed?.hora) return new Date(`${feed.data_date}T${feed.hora}:00`).getTime()
+    return 0
+  }
 
   const loadFeeds = async () => {
     const { data } = await sb
       .from('feeds')
       .select('*, profiles(name)')
       .eq('child_id', activeChild.id)
-      .eq('data_date', today())
+      
       .order('created_at', { ascending: false })
-    setFeeds(data || [])
+    .limit(30)
+    const orderedFeeds = (data || []).sort((a, b) => feedToTimestampMs(b) - feedToTimestampMs(a))
+    setFeeds(orderedFeeds)
   }
 
   const toggleTimer = async () => {
@@ -52,7 +59,7 @@ export default function MamadasPage() {
     }
   }
 
-  const totalHoje = feeds.reduce((a, f) => a + (f.duracao_seg || 0), 0)
+  const feedsHoje = feeds.filter(f => f.data_date === today())   const totalHoje = feedsHoje.reduce((a, f) => a + (f.duracao_seg || 0), 0)
 
   if (!activeChild) return (
     <div className="page-content">
@@ -117,7 +124,7 @@ export default function MamadasPage() {
       {feeds.length > 0 && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           <div style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px', textAlign: 'center' }}>
-            <div style={{ fontFamily: 'Fraunces, serif', fontSize: 24, fontWeight: 300, color: 'var(--earth)' }}>{feeds.length}</div>
+             <div style={{ fontFamily: 'Fraunces, serif', fontSize: 24, fontWeight: 300, color: 'var(--earth)' }}>{feedsHoje.length}</div>
             <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Mamadas</div>
           </div>
           <div style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px', textAlign: 'center' }}>
@@ -129,19 +136,19 @@ export default function MamadasPage() {
 
       {/* Lista */}
       <div className="card">
-        <div className="card-title">🍼 Mamadas de hoje</div>
+       <div className="card-title">🍼 Mamadas recentes</div>
         {feeds.length === 0 ? (
           <div className="empty-state" style={{ padding: '20px 0' }}>
-            <div className="e-icon">🍼</div><p>Ainda sem mamadas hoje</p>
+          <div className="e-icon">🍼</div><p>Ainda sem mamadas</p>
           </div>
         ) : feeds.map(f => (
           <div key={f.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 500 }}>
-                {f.hora} · <span style={{ fontFamily: 'monospace' }}>{fmtSecs(f.duracao_seg || 0)}</span>
+             {f.hora} - {f.lado ? (LADO_LABELS[f.lado] || f.lado) : '–'}
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                {f.lado ? (LADO_LABELS[f.lado] || f.lado) : '–'}
+                {fmtSecs(f.duracao_seg || 0)}
                 {f.obs ? ' · ' + f.obs : ''}
                 {f.profiles?.name ? ' · ' + f.profiles.name : ''}
               </div>
