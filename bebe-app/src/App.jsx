@@ -20,7 +20,7 @@ function AppShell() {
   const { profile, activeChild, children, switchChild, toast, syncState } = useApp()
   const [page, setPage] = useState('sono')
   const [showChildPicker, setShowChildPicker] = useState(false)
-
+  const [isNightMode, setIsNightMode] = useState(false)
   // Amamentação só aparece se a criança activa tiver amamentacao=true
   const showAmamentacao = activeChild?.amamentacao === true
 
@@ -37,6 +37,22 @@ function AppShell() {
   useEffect(() => {
     if (page === 'amamentacao' && !showAmamentacao) setPage('sono')
   }, [showAmamentacao])
+// Modo noite automático: ativo entre 19:00 e 08:00
+  useEffect(() => {
+    const updateNightMode = () => {
+      const h = new Date().getHours()
+      setIsNightMode(h >= 19 || h < 8)
+    }
+
+    updateNightMode()
+    const timer = setInterval(updateNightMode, 60 * 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    document.body.classList.toggle('night-mode', isNightMode)
+    return () => document.body.classList.remove('night-mode')
+  }, [isNightMode])
 
   const PAGES = {
     sono: SonoPage,
