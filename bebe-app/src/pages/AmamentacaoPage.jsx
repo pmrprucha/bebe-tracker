@@ -40,8 +40,8 @@ export default function AmamentacaoPage() {
   const [timerStartMs, setTimerStartMs] = useState(null)
   const [lado, setLado]                 = useState(null)
   const [elapsed, setElapsed]           = useState(0)
-  const [sinceSecs, setSinceSecs]       = useState(null) // desde última AMAMENTAÇÃO ou REFEIÇÃO
-  const [sinceLabel, setSinceLabel]     = useState('') // "amamentação" ou "refeição"
+  const [sinceSecs, setSinceSecs]       = useState(null) // desde Ãºltima AMAMENTAÃÃO ou REFEIÃÃO
+  const [sinceLabel, setSinceLabel]     = useState('') // "amamentaÃ§Ã£o" ou "refeiÃ§Ã£o"
 
   const intervalRef = useRef(null)
   const sinceRef    = useRef(null)
@@ -75,26 +75,26 @@ export default function AmamentacaoPage() {
     setFeeds(data || [])
   }
 
-  // ── Contador "desde última amamentação ou refeição" ─
+  // ââ Contador "desde Ãºltima amamentaÃ§Ã£o ou refeiÃ§Ã£o" â
   useEffect(() => {
     clearInterval(sinceRef.current)
     if (timerActive) { setSinceSecs(null); return }
 
-    // Buscar também a última refeição para comparar
+    // Buscar tambÃ©m a Ãºltima refeiÃ§Ã£o para comparar
     const calcSince = async () => {
       let latestMs = null
       let label = ''
 
-      // Última amamentação
+      // Ãltima amamentaÃ§Ã£o
       if (feeds.length > 0) {
         const ultima = feeds[0]
         const feedMs = ultima.created_at
           ? new Date(ultima.created_at).getTime() + (ultima.duracao_seg || 0) * 1000
           : horaToMs(ultima.hora)
-        if (feedMs) { latestMs = feedMs; label = 'amamentação' }
+        if (feedMs) { latestMs = feedMs; label = 'amamentaÃ§Ã£o' }
       }
 
-      // Última refeição (pode ser mais recente)
+      // Ãltima refeiÃ§Ã£o (pode ser mais recente)
       const { data: mealData } = await sb
         .from('meals').select('hora, created_at')
         .eq('child_id', activeChild.id).eq('data_date', today())
@@ -103,7 +103,7 @@ export default function AmamentacaoPage() {
       if (mealData?.length) {
         const mealMs = horaToMs(mealData[0].hora)
         if (mealMs && (!latestMs || mealMs > latestMs)) {
-          latestMs = mealMs; label = 'refeição'
+          latestMs = mealMs; label = 'refeiÃ§Ã£o'
         }
       }
 
@@ -118,7 +118,7 @@ export default function AmamentacaoPage() {
     return () => clearInterval(sinceRef.current)
   }, [feeds, timerActive, activeChild])
 
-  // ── Timer ao vivo ──────────────────────────────────
+  // ââ Timer ao vivo ââââââââââââââââââââââââââââââââââ
   useEffect(() => {
     clearInterval(intervalRef.current)
     if (!timerActive || !timerStartMs) return
@@ -128,7 +128,7 @@ export default function AmamentacaoPage() {
     return () => clearInterval(intervalRef.current)
   }, [timerActive, timerStartMs])
 
-  // ── Iniciar ────────────────────────────────────────
+  // ââ Iniciar ââââââââââââââââââââââââââââââââââââââââ
   const iniciar = (l) => {
     if (timerActive) return
     const startMs = Date.now()
@@ -136,7 +136,7 @@ export default function AmamentacaoPage() {
     localStorage.setItem(TIMER_KEY, JSON.stringify({ startMs, lado: l }))
   }
 
-  // ── Terminar ───────────────────────────────────────
+  // ââ Terminar âââââââââââââââââââââââââââââââââââââââ
   const terminar = async () => {
     if (!timerActive || !timerStartMs) return
     clearInterval(intervalRef.current)
@@ -156,7 +156,7 @@ export default function AmamentacaoPage() {
     else showToast('Erro ao guardar')
   }
 
-  // ── Edit / Delete ──────────────────────────────────
+  // ââ Edit / Delete ââââââââââââââââââââââââââââââââââ
   const openEdit = (f) => {
     setEditId(f.id); setEditHora(f.hora || '')
     setEditDurMin(String(Math.floor((f.duracao_seg || 0) / 60)))
@@ -167,7 +167,7 @@ export default function AmamentacaoPage() {
   const saveEdit = async () => {
     const duracao_seg = (parseInt(editDurMin) || 0) * 60 + (parseInt(editDurSec) || 0)
     const { error } = await sb.from('feeds').update({ hora: editHora, duracao_seg, lado: editLado }).eq('id', editId)
-    if (!error) { showToast('Atualizado ✓'); setEditId(null); loadFeeds() }
+    if (!error) { showToast('Atualizado â'); setEditId(null); loadFeeds() }
     else showToast('Erro ao atualizar')
   }
 
@@ -191,7 +191,7 @@ export default function AmamentacaoPage() {
 
   if (!activeChild) return (
     <div className="page-content">
-      <div className="empty-state"><div className="e-icon">👶</div><p>Seleciona uma criança primeiro</p></div>
+      <div className="empty-state"><div className="e-icon">ð¶</div><p>Seleciona uma crianÃ§a primeiro</p></div>
     </div>
   )
 
@@ -212,7 +212,7 @@ export default function AmamentacaoPage() {
             padding:'5px 14px', marginBottom:14,
             fontSize:13, fontWeight:600, color:sinceColor
           }}>
-            🕐 Última {sinceLabel} há {sinceStr}
+            ð Ãltima {sinceLabel} hÃ¡ {sinceStr}
           </div>
         )}
 
@@ -221,7 +221,7 @@ export default function AmamentacaoPage() {
         )}
 
         <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.8px', opacity:0.75 }}>
-          {timerActive ? `A amamentar — ${LADO_LABELS[lado] || ''}` : 'Amamentação'}
+          {timerActive ? `A amamentar â ${LADO_LABELS[lado] || ''}` : 'AmamentaÃ§Ã£o'}
         </div>
 
         <div style={{ fontFamily:'Fraunces, serif', fontSize:56, fontWeight:300, letterSpacing:-2, lineHeight:1, margin:'14px 0' }}>
@@ -240,19 +240,19 @@ export default function AmamentacaoPage() {
               flex:1, background:'rgba(255,255,255,0.95)', color:'var(--sky)',
               border:'none', borderRadius:50, padding:'13px 8px',
               fontFamily:'Instrument Sans, sans-serif', fontSize:14, fontWeight:700, cursor:'pointer'
-            }}>◀ Esquerdo</button>
+            }}>â Esquerdo</button>
             <button onClick={() => iniciar('D')} style={{
               flex:1, background:'rgba(255,255,255,0.95)', color:'var(--sky)',
               border:'none', borderRadius:50, padding:'13px 8px',
               fontFamily:'Instrument Sans, sans-serif', fontSize:14, fontWeight:700, cursor:'pointer'
-            }}>Direito ▶</button>
+            }}>Direito â¶</button>
           </div>
         ) : (
           <button onClick={terminar} style={{
             width:'100%', background:'rgba(255,255,255,0.15)', color:'white',
             border:'2px solid rgba(255,255,255,0.4)', borderRadius:50, padding:'13px',
             fontFamily:'Instrument Sans, sans-serif', fontSize:15, fontWeight:600, cursor:'pointer'
-          }}>⏹ Terminar</button>
+          }}>â¹ Terminar</button>
         )}
       </div>
 
@@ -272,10 +272,10 @@ export default function AmamentacaoPage() {
 
       {/* Lista */}
       <div className="card">
-        <div className="card-title">🤱 Amamentações de hoje</div>
+        <div className="card-title">ð¤± AmamentaÃ§Ãµes de hoje</div>
         {feeds.length === 0 ? (
           <div className="empty-state" style={{ padding:'20px 0' }}>
-            <div className="e-icon">🤱</div><p>Ainda sem registos hoje</p>
+            <div className="e-icon">ð¤±</div><p>Ainda sem registos hoje</p>
           </div>
         ) : feeds.map(f => (
           <div key={f.id} style={{ padding:'11px 0', borderBottom:'1px solid var(--border)' }}>
@@ -317,18 +317,19 @@ export default function AmamentacaoPage() {
             ) : (
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                 <div>
-                  <div style={{ fontSize:14, fontWeight:500 }}>
-                    {f.hora} · <span style={{ fontFamily:'monospace' }}>{fmtSecs(f.duracao_seg || 0)}</span>
+        <div style={{ display:'flex', alignItems:'baseline', gap:8 }}>
+                    <span style={{ fontSize:22, fontWeight:700, color:'var(--sky)', fontFamily:'monospace' }}>{f.hora}</span>
+                    <span style={{ fontSize:14, color:'var(--muted)', fontFamily:'monospace' }}>{fmtSecs(f.duracao_seg || 0)}</span>
                   </div>
                   <div style={{ fontSize:12, color:'var(--muted)', marginTop:2 }}>
-                    {f.lado ? (LADO_LABELS[f.lado] || f.lado) : '–'}
-                    {f.profiles?.name ? ' · ' + f.profiles.name : ''}
+                    {f.lado ? (LADO_LABELS[f.lado] || f.lado) : 'â'}
+                    {f.profiles?.name ? ' Â· ' + f.profiles.name : ''}
                   </div>
                 </div>
                 {session && (
                   <div style={{ display:'flex', gap:6 }}>
-                    <button onClick={() => openEdit(f)} style={{ padding:'6px 10px', borderRadius:8, border:'1px solid var(--border)', background:'var(--warm)', color:'var(--earth)', fontSize:12, cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>✏️</button>
-                    <button onClick={() => setDeleteId(f.id)} style={{ padding:'6px 10px', borderRadius:8, border:'1px solid rgba(192,97,78,0.3)', background:'rgba(192,97,78,0.06)', color:'var(--danger)', fontSize:12, cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>🗑</button>
+                    <button onClick={() => openEdit(f)} style={{ padding:'6px 10px', borderRadius:8, border:'1px solid var(--border)', background:'var(--warm)', color:'var(--earth)', fontSize:12, cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>âï¸</button>
+                    <button onClick={() => setDeleteId(f.id)} style={{ padding:'6px 10px', borderRadius:8, border:'1px solid rgba(192,97,78,0.3)', background:'rgba(192,97,78,0.06)', color:'var(--danger)', fontSize:12, cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}>ð</button>
                   </div>
                 )}
               </div>
@@ -342,9 +343,9 @@ export default function AmamentacaoPage() {
         <div className="modal-overlay" onClick={() => setDeleteId(null)}>
           <div className="modal-sheet" onClick={e => e.stopPropagation()}>
             <div style={{ textAlign:'center', marginBottom:20 }}>
-              <div style={{ fontSize:40, marginBottom:10 }}>🗑️</div>
+              <div style={{ fontSize:40, marginBottom:10 }}>ðï¸</div>
               <h3 style={{ fontFamily:'Fraunces, serif', fontSize:18, fontWeight:400, marginBottom:8 }}>Apagar registo?</h3>
-              <p style={{ fontSize:14, color:'var(--muted)' }}>Esta acção não pode ser desfeita.</p>
+              <p style={{ fontSize:14, color:'var(--muted)' }}>Esta acÃ§Ã£o nÃ£o pode ser desfeita.</p>
             </div>
             <div style={{ display:'flex', gap:10 }}>
               <button onClick={() => setDeleteId(null)} style={{ flex:1, padding:'13px', borderRadius:12, border:'1px solid var(--border)', background:'var(--warm)', color:'var(--text)', fontSize:15, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>Cancelar</button>
