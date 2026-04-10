@@ -138,7 +138,7 @@ export default function MedicoPage() {
     setTreatments(treats || [])
     if (treats?.length) {
       const { data: allLogs } = await sb.from('treatment_logs')
-        .select('*, profiles(name)')
+        .select('*')
         .in('treatment_id', treats.map(t => t.id))
         .order('tomado_em', { ascending: false })
       const byT = {}
@@ -427,7 +427,7 @@ export default function MedicoPage() {
                   <div>
                     <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px' }}>{atrasado?'Em atraso':'Proxima dose'}</div>
                     <div style={{ fontSize:14, fontWeight:700, color: atrasado?'var(--danger)':'var(--sage)', marginTop:2 }}>{proxima}</div>
-                    {lastLog && <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>Ultima: {fmtDateTime(lastLog.tomado_em)}{lastLog.profiles?.name?' · '+lastLog.profiles.name:''}</div>}
+                    {lastLog && <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>Ultima: {fmtDateTime(lastLog.tomado_em)}</div>}
                   </div>
                   <button onClick={() => abrirConfirmToma(t)} style={{ padding:'10px 14px', borderRadius:10, border:'none', background: atrasado?'var(--danger)':'var(--sage)', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit', flexShrink:0 }}>
                     Confirmar toma
