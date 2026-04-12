@@ -5,10 +5,11 @@ import AuthPage from './pages/AuthPage'
 import SonoPage from './pages/SonoPage'
 import AmamentacaoPage from './pages/AmamentacaoPage'
 import AlimentacaoPage from './pages/AlimentacaoPage'
+import DespensaPage from './pages/DespensaPage'
 import MedicoPage from './pages/MedicoPage'
 import HistoricoPage from './pages/HistoricoPage'
 import PerfilPage from './pages/PerfilPage'
-import { getAgeLabel, getWeeks } from './lib/sleep'
+import { getAgeLabel } from './lib/sleep'
 
 export default function App() {
   const { session, loading } = useApp()
@@ -26,45 +27,50 @@ function AppShell() {
   const [page, setPage] = useState('sono')
   const [showChildPicker, setShowChildPicker] = useState(false)
 
-  // ── Alertas de medicamentos ────────────────────────
-  const [medAlerts, setMedAlerts] = useState([]) // treatments em atraso
+  // ── Alertas medicamentos ──────────────────────────
+  const [medAlerts, setMedAlerts] = useState([])
   const medTimerRef = useRef(null)
+
+  // ── Alertas despensa ──────────────────────────────
+  const [despensaAlerts, setDespensaAlerts] = useState(0)
+  const despensaTimerRef = useRef(null)
 
   const checkMedAlerts = async () => {
     if (!activeChild) return
-    const { data: treats } = await sb
-      .from('treatments')
-      .select('id, medicamento, dose, unidade, periodicidade_horas')
-      .eq('child_id', activeChild.id)
-      .eq('ativo', true)
-
+    const { data: treats } = await sb.from('treatments').select('id,periodicidade_horas')
+      .eq('child_id', activeChild.id).eq('ativo', true)
     if (!treats?.length) { setMedAlerts([]); return }
-
-    const { data: logs } = await sb
-      .from('treatment_logs')
-      .select('treatment_id, tomado_em')
-      .in('treatment_id', treats.map(t => t.id))
-      .order('tomado_em', { ascending: false })
-
+    const { data: logs } = await sb.from('treatment_logs').select('treatment_id,tomado_em')
+      .in('treatment_id', treats.map(t => t.id)).order('tomado_em', { ascending: false })
     const lastLog = {}
-    for (const log of (logs || [])) {
-      if (!lastLog[log.treatment_id]) lastLog[log.treatment_id] = log.tomado_em
-    }
-
+    for (const l of (logs||[])) { if (!lastLog[l.treatment_id]) lastLog[l.treatment_id] = l.tomado_em }
     const atrasados = treats.filter(t => {
       const last = lastLog[t.id]
-      if (!last) return true // nunca tomou
-      const next = new Date(last).getTime() + t.periodicidade_horas * 3600000
-      return Date.now() > next
+      if (!last) return true
+      return Date.now() > new Date(last).getTime() + t.periodicidade_horas * 3600000
     })
-
     setMedAlerts(atrasados)
+  }
+
+  const checkDespensaAlerts = async () => {
+    const today = new Date().toISOString().slice(0,10)
+    const threeDays = new Date(Date.now() + 3*86400000).toISOString().slice(0,10)
+    const { count } = await sb.from('food_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('consumido', false)
+      .lte('data_validade', threeDays)
+    setDespensaAlerts(count || 0)
   }
 
   useEffect(() => {
     checkMedAlerts()
-    medTimerRef.current = setInterval(checkMedAlerts, 60000) // check every minute
-    return () => clearInterval(medTimerRef.current)
+    checkDespensaAlerts()
+    medTimerRef.current = setInterval(checkMedAlerts, 60000)
+    despensaTimerRef.current = setInterval(checkDespensaAlerts, 300000)
+    return () => {
+      clearInterval(medTimerRef.current)
+      clearInterval(despensaTimerRef.current)
+    }
   }, [activeChild])
 
   // ── Navegacao ──────────────────────────────────────
@@ -72,20 +78,22 @@ function AppShell() {
 
   const NAV = [
     { key: 'sono',        icon: '🌙', label: 'Sono' },
-    ...(mostrarAmamentacao ? [{ key: 'amamentacao', icon: '🤱', label: 'Amamentacao' }] : []),
-    { key: 'alimentacao', icon: '🍽️', label: 'Alimentacao' },
+    ...(mostrarAmamentacao ? [{ key: 'amamentacao', icon: '🤱', label: 'Mama' }] : []),
+    { key: 'alimentacao', icon: '🍽️', label: 'Comida' },
+    { key: 'despensa',    icon: '🍱', label: 'Despensa', alert: despensaAlerts > 0 },
     { key: 'medico',      icon: '🩺', label: 'Saude', alert: medAlerts.length > 0 },
-    { key: 'historico',   icon: '📋', label: 'Historico' },
+    { key: 'historico',   icon: '📋', label: 'Hist.' },
     { key: 'perfil',      icon: '👤', label: 'Perfil' },
   ]
 
   const PAGES = {
-    sono: SonoPage,
+    sono:        SonoPage,
     amamentacao: AmamentacaoPage,
     alimentacao: AlimentacaoPage,
-    medico: MedicoPage,
-    historico: HistoricoPage,
-    perfil: PerfilPage,
+    despensa:    DespensaPage,
+    medico:      MedicoPage,
+    historico:   HistoricoPage,
+    perfil:      PerfilPage,
   }
 
   useEffect(() => {
@@ -98,40 +106,29 @@ function AppShell() {
   return (
     <div style={{ minHeight:'100dvh', display:'flex', flexDirection:'column' }}>
 
-      {/* ── BANNER GLOBAL MEDICAMENTOS ── */}
+      {/* Banner medicamentos */}
       {medAlerts.length > 0 && page !== 'medico' && (
-        <div
-          onClick={() => setPage('medico')}
-          style={{
-            background: 'var(--danger)',
-            padding: '10px 16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            cursor: 'pointer',
-            animation: 'bannerPulse 2s ease-in-out infinite',
-            zIndex: 100,
-            flexShrink: 0,
-          }}
-        >
-          <style>{`
-            @keyframes bannerPulse {
-              0%,100% { background: #e07070; }
-              50%      { background: #c84040; }
-            }
-          `}</style>
-          <span style={{ fontSize: 20 }}>💊</span>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>
-              {medAlerts.length === 1
-                ? `${medAlerts[0].medicamento} — toma em atraso`
-                : `${medAlerts.length} medicamentos em atraso`}
+        <div onClick={() => setPage('medico')} style={{ background:'var(--danger)', padding:'10px 16px', display:'flex', alignItems:'center', gap:10, cursor:'pointer', flexShrink:0, animation:'bannerPulse 2s ease-in-out infinite' }}>
+          <style>{`@keyframes bannerPulse{0%,100%{background:#e07070}50%{background:#c84040}}`}</style>
+          <span style={{ fontSize:18 }}>💊</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:'white' }}>
+              {medAlerts.length === 1 ? '1 medicamento em atraso' : `${medAlerts.length} medicamentos em atraso`}
             </div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.75)' }}>
-              Toca para confirmar
-            </div>
+            <div style={{ fontSize:11, color:'rgba(255,255,255,0.75)' }}>Toca para confirmar</div>
           </div>
-          <span style={{ color: 'white', fontSize: 18, opacity: 0.8 }}>›</span>
+          <span style={{ color:'white', fontSize:18, opacity:0.8 }}>›</span>
+        </div>
+      )}
+
+      {/* Banner despensa */}
+      {despensaAlerts > 0 && page !== 'despensa' && (
+        <div onClick={() => setPage('despensa')} style={{ background:'rgba(232,184,75,0.9)', padding:'8px 16px', display:'flex', alignItems:'center', gap:10, cursor:'pointer', flexShrink:0 }}>
+          <span style={{ fontSize:16 }}>⚠️</span>
+          <div style={{ flex:1, fontSize:12, fontWeight:600, color:'#5a4000' }}>
+            {despensaAlerts} {despensaAlerts === 1 ? 'item' : 'itens'} a expirar na despensa
+          </div>
+          <span style={{ color:'#5a4000', fontSize:16, opacity:0.8 }}>›</span>
         </div>
       )}
 
@@ -147,9 +144,7 @@ function AppShell() {
               <button onClick={() => children.length > 1 && setShowChildPicker(true)}
                 style={{ display:'flex', alignItems:'center', gap:8, background:'var(--warm)', border:'1px solid var(--border)', borderRadius:20, padding:'5px 12px 5px 8px', cursor: children.length > 1 ? 'pointer' : 'default', fontFamily:'inherit' }}>
                 <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--sand)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, overflow:'hidden' }}>
-                  {activeChild.avatar_url
-                    ? <img src={activeChild.avatar_url} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" />
-                    : '👶'}
+                  {activeChild.avatar_url ? <img src={activeChild.avatar_url} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" /> : '👶'}
                 </div>
                 <div>
                   <div style={{ fontSize:13, fontWeight:600, color:'var(--deep)', lineHeight:1 }}>{activeChild.name}</div>
@@ -159,9 +154,7 @@ function AppShell() {
               </button>
             )}
             <div className="avatar" style={{ width:32, height:32, fontSize:16 }}>
-              {profile?.avatar_url
-                ? <img src={profile.avatar_url} style={{ width:'100%', height:'100%', borderRadius:'50%', objectFit:'cover' }} alt="" />
-                : '👤'}
+              {profile?.avatar_url ? <img src={profile.avatar_url} style={{ width:'100%', height:'100%', borderRadius:'50%', objectFit:'cover' }} alt="" /> : '👤'}
             </div>
           </div>
         </div>
@@ -171,10 +164,10 @@ function AppShell() {
       {showChildPicker && (
         <div className="modal-overlay" onClick={() => setShowChildPicker(false)}>
           <div className="modal-sheet">
-            <h3 style={{ fontFamily:'Fraunces, serif', fontSize:18, fontWeight:400, marginBottom:16 }}>Escolher criança</h3>
+            <h3 style={{ fontFamily:'Fraunces, serif', fontSize:18, fontWeight:400, marginBottom:16 }}>Escolher crianca</h3>
             {children.map(kid => (
               <button key={kid.id} onClick={() => { switchChild(kid); setShowChildPicker(false) }}
-                style={{ width:'100%', display:'flex', alignItems:'center', gap:12, padding:'12px', borderRadius:12, border:'1px solid', borderColor: activeChild?.id === kid.id ? 'var(--earth)' : 'var(--border)', background: activeChild?.id === kid.id ? 'rgba(139,111,71,0.05)' : 'var(--warm)', cursor:'pointer', marginBottom:8, fontFamily:'inherit' }}>
+                style={{ width:'100%', display:'flex', alignItems:'center', gap:12, padding:'12px', borderRadius:12, border:'1px solid', borderColor: activeChild?.id===kid.id?'var(--earth)':'var(--border)', background: activeChild?.id===kid.id?'rgba(139,111,71,0.05)':'var(--warm)', cursor:'pointer', marginBottom:8, fontFamily:'inherit' }}>
                 <div style={{ width:44, height:44, borderRadius:'50%', background:'var(--sand)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, overflow:'hidden' }}>
                   {kid.avatar_url ? <img src={kid.avatar_url} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" /> : '👶'}
                 </div>
@@ -182,22 +175,20 @@ function AppShell() {
                   <div style={{ fontSize:15, fontWeight:600 }}>{kid.name}</div>
                   <div style={{ fontSize:12, color:'var(--muted)' }}>{getAgeLabel(kid.birthdate)}</div>
                 </div>
-                {activeChild?.id === kid.id && <span style={{ marginLeft:'auto', color:'var(--earth)' }}>✓</span>}
+                {activeChild?.id===kid.id && <span style={{ marginLeft:'auto', color:'var(--earth)' }}>✓</span>}
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {/* Sem criança */}
+      {/* Sem crianca */}
       {!activeChild && page !== 'perfil' && (
         <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
           <div className="empty-state">
             <div className="e-icon">🌿</div>
-            <p>Vai ao <strong>Perfil → Criança</strong> para adicionar o teu bebe.</p>
-            <button className="btn btn-primary" onClick={() => setPage('perfil')} style={{ marginTop:16 }}>
-              Ir para Perfil
-            </button>
+            <p>Vai ao <strong>Perfil</strong> para adicionar o teu bebe.</p>
+            <button className="btn btn-primary" onClick={() => setPage('perfil')} style={{ marginTop:16 }}>Ir para Perfil</button>
           </div>
         </div>
       )}
@@ -213,27 +204,18 @@ function AppShell() {
       <nav className="bottom-nav">
         {NAV.map(n => (
           <button key={n.key} className={`nav-item ${page === n.key ? 'active' : 'inactive'}`}
-            onClick={() => setPage(n.key)}
-            style={{ position: 'relative' }}>
+            onClick={() => setPage(n.key)} style={{ position:'relative' }}>
             <span className="nav-icon">{n.icon}</span>
             {n.label}
-            {/* Badge de alerta */}
             {n.alert && (
-              <span style={{
-                position: 'absolute', top: 6, right: '50%', marginRight: -18,
-                width: 10, height: 10, borderRadius: '50%',
-                background: 'var(--danger)', border: '2px solid white',
-                display: 'block'
-              }} />
+              <span style={{ position:'absolute', top:6, right:'50%', marginRight:-18, width:10, height:10, borderRadius:'50%', background:'var(--danger)', border:'2px solid white', display:'block' }} />
             )}
           </button>
         ))}
       </nav>
 
       {toast && (
-        <div className="toast-container">
-          <div className="toast">{toast}</div>
-        </div>
+        <div className="toast-container"><div className="toast">{toast}</div></div>
       )}
     </div>
   )
